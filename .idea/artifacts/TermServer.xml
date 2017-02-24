@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" build-on-make="true" name="TermServer">
+    <output-path>$PROJECT_DIR$/../Jinix/root/bin</output-path>
+    <root id="archive" name="TermServer.jar">
+      <element id="module-output" name="TermServer" />
+    </root>
+  </artifact>
+</component>

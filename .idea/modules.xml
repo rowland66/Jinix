@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/ExecLauncher/ExecLauncher.iml" filepath="$PROJECT_DIR$/ExecLauncher/ExecLauncher.iml" />
+      <module fileurl="file://$PROJECT_DIR$/Translators/FifoServer/FifoServer.iml" filepath="$PROJECT_DIR$/Translators/FifoServer/FifoServer.iml" />
+      <module fileurl="file://$PROJECT_DIR$/Jinix.iml" filepath="$PROJECT_DIR$/Jinix.iml" />
+      <module fileurl="file://$PROJECT_DIR$/Translators/NativeFileSystem/NativeFileSystem.iml" filepath="$PROJECT_DIR$/Translators/NativeFileSystem/NativeFileSystem.iml" />
+      <module fileurl="file://$PROJECT_DIR$/ProgrammingInterface/ProgrammingInterface.iml" filepath="$PROJECT_DIR$/ProgrammingInterface/ProgrammingInterface.iml" />
+      <module fileurl="file://$PROJECT_DIR$/Runtime/Runtime.iml" filepath="$PROJECT_DIR$/Runtime/Runtime.iml" />
+      <module fileurl="file://$PROJECT_DIR$/ServerInterfaces/ServerInterfaces.iml" filepath="$PROJECT_DIR$/ServerInterfaces/ServerInterfaces.iml" />
+      <module fileurl="file://$PROJECT_DIR$/Servers/Servers.iml" filepath="$PROJECT_DIR$/Servers/Servers.iml" />
+      <module fileurl="file://$PROJECT_DIR$/Translators/TermServer/TermServer.iml" filepath="$PROJECT_DIR$/Translators/TermServer/TermServer.iml" />
+      <module fileurl="file://$PROJECT_DIR$/junixsocket/junixsocket.iml" filepath="$PROJECT_DIR$/junixsocket/junixsocket.iml" />
+    </modules>
+  </component>
+</project>

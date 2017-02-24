@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" build-on-make="true" name="NativeFileSystem">
+    <output-path>$PROJECT_DIR$/../Jinix/lib</output-path>
+    <root id="archive" name="NativeFileSystem.jar">
+      <element id="module-output" name="NativeFileSystem" />
+    </root>
+  </artifact>
+</component>
