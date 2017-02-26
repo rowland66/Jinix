@@ -20,6 +20,8 @@ package org.newsclub.net.unix;
 import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 
 /**
  * Describes an {@link InetSocketAddress} that actually uses AF_UNIX sockets instead of AF_INET.
@@ -54,7 +56,17 @@ public class AFUNIXSocketAddress extends InetSocketAddress {
   public AFUNIXSocketAddress(final File socketFile, int port) throws IOException {
     super(0);
     if (port != 0) {
-      NativeUnixSocket.setPort1(this, port);
+        AccessController.doPrivileged(new PrivilegedAction<Void>() {
+            @Override
+            public Void run() {
+                try {
+                    NativeUnixSocket.setPort1(AFUNIXSocketAddress.this, port);
+                } catch (AFUNIXSocketException e) {
+                    e.printStackTrace();
+                }
+                return null;
+            }
+        });
     }
     this.socketFile = socketFile.getCanonicalPath();
   }
@@ -64,7 +76,7 @@ public class AFUNIXSocketAddress extends InetSocketAddress {
    * 
    * @return The file path.
    */
-  public String getSocketFile() {
+  String getSocketFile() {
     return socketFile;
   }
 

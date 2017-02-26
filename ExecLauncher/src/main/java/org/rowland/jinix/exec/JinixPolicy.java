@@ -18,15 +18,10 @@ public class JinixPolicy extends Policy {
 
     private final PermissionCollection allowed;
 
-    public JinixPolicy() {
+    JinixPolicy() {
         allowed = new Permissions();
-        allowed.add(new SocketPermission("", SecurityConstants.SOCKET_CONNECT_ACTION));
-        allowed.add(new SocketPermission("", SecurityConstants.SOCKET_LISTEN_ACTION));
-        allowed.add(new SocketPermission("", SecurityConstants.SOCKET_ACCEPT_ACTION));
         allowed.add(new PropertyPermission("*", SecurityConstants.PROPERTY_READ_ACTION));
-        allowed.add(new RuntimePermission("exitVM", null));
-        allowed.add(new RuntimePermission("setIO", null));
-        allowed.add(new RuntimePermission("getClassLoader", null));
+        allowed.add(new RuntimePermission("*", null));
     }
 
     @Override
@@ -36,7 +31,9 @@ public class JinixPolicy extends Policy {
             if (((ExecClassLoader) domain.getClassLoader()).isPrivileged()) {
                 return true; // privileged classloader grants native access and all privileges
             }
-            return allowed.implies(permission);
+            if (permission instanceof JinixNativeAccessPermission) {
+                return false;
+            }
         }
         return true;
     }

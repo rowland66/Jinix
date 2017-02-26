@@ -18,5 +18,10 @@
 		<artifactId>ServerInterfaces</artifactId>
 		<version>0.1-SNAPSHOT</version>
 	</dependency>
+	<dependency>
+		<groupId>org.rowland.jinix</groupId>
+		<artifactId>ProgrammingInterface</artifactId>
+		<version>0.1-SNAPSHOT</version>
+	</dependency>
   </dependencies>
 </project>

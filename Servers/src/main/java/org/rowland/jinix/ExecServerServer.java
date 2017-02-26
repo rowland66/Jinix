@@ -29,7 +29,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
     private String javaHome;
     private NameSpace ns;
     private ProcessManager pm;
-    private Map<Integer, ExecLauncherCallbackData> callbackDataMap = new HashMap<Integer,ExecLauncherCallbackData>();
+    private final Map<Integer, ExecLauncherCallbackData> callbackDataMap = new HashMap<>();
 
     ExecServerServer(NameSpace nameSpace, String javaHome) throws RemoteException {
         super();
@@ -101,7 +101,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                     File.separator + "bin" +
                     File.separator + "java";
         }
-        List<String> cmdList = new ArrayList<String>(16);
+        List<String> cmdList = new ArrayList<>(16);
         cmdList.add(javaCmd);
         cmdList.add("-Xbootclasspath/p:" +
                 "./lib/Runtime.jar" + File.pathSeparator +
@@ -109,6 +109,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                 "./lib/ServerInterfaces.jar");
         cmdList.add("-Djava.nio.file.spi.DefaultFileSystemProvider=org.rowland.jinix.nio.JinixFileSystemProvider");
         //cmdList.add("-Dsun.misc.URLClassPath.debug=true");
+        //cmdList.add("-Djava.security.debug=\"access,failure\"");
         if (codebaseURL != null) {
             //cmdList.add("-Djava.rmi.server.codebase="+codebaseURL);
             //cmdList.add("-Djava.rmi.server.logCalls=true");
@@ -281,10 +282,11 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
      * For AFUNIX every server needs a name, and translators are servers. Derive
      * a name from the translatorNodePath which should be unique for the system.
      *
-     * @param translatorNodePath
-     * @return
+     * @param translatorNodePath the translators fully qualified name in the global
+     *                           namespace
+     * @return the server name
      */
-    protected static String getTranslatorServerName(String translatorNodePath) {
+    private static String getTranslatorServerName(String translatorNodePath) {
         if (translatorNodePath.startsWith("/")) {
             translatorNodePath = translatorNodePath.substring(1);
         }

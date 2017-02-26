@@ -43,8 +43,7 @@ public class AFUNIXRMISocketFactory extends RMISocketFactory implements External
     private static final String CONFIG_FILE_PROPERTY_SOCKET_DIRECTORY = "socket.directory";
 
     private static final File DEFAULT_SOCKET_DIRECTORY = new File("/tmp");
-    static final String DEFAULT_SOCKET_FILE_PREFIX = "";
-    static final String DEFAULT_SOCKET_FILE_SUFFIX = ".rmi";
+    private static final String DEFAULT_SOCKET_FILE_SUFFIX = ".rmi";
 
     private static final long serialVersionUID = 1L;
 
@@ -77,8 +76,6 @@ public class AFUNIXRMISocketFactory extends RMISocketFactory implements External
             } else {
                 socketDir = DEFAULT_SOCKET_DIRECTORY;
             }
-        } else {
-            socketDir = socketDir;
         }
     }
 
@@ -91,12 +88,12 @@ public class AFUNIXRMISocketFactory extends RMISocketFactory implements External
         this(null, null);
     }
 
-    public AFUNIXRMISocketFactory(final RMIClientSocketFactory defaultClientFactory,
+    private AFUNIXRMISocketFactory(final RMIClientSocketFactory defaultClientFactory,
                                   final RMIServerSocketFactory defaultServerFactory) {
         this(defaultClientFactory, defaultServerFactory, null, null);
     }
 
-    public AFUNIXRMISocketFactory(final RMIClientSocketFactory defaultClientFactory,
+    private AFUNIXRMISocketFactory(final RMIClientSocketFactory defaultClientFactory,
                                   final RMIServerSocketFactory defaultServerFactory, final String socketPrefix,
                                   final String socketSuffix) {
 
@@ -134,12 +131,8 @@ public class AFUNIXRMISocketFactory extends RMISocketFactory implements External
         return AFUNIXSocket.connectTo(addr);
     }
 
-    public File getSocketDir() {
-        return socketDir;
-    }
-
     private File getFile(String host, int port) {
-        if (host == null || host.equals("127.0.0.1") || host.equals("127.0.1.1")) {
+        if (host == null || host.equals("127.0.0.1") || host.equals("127.0.1.1") || host.equals("0.0.0.0")) {
             host = socketPrefix;
             if (host == null) {
                 throw new RuntimeException("Illegal attempt to create RMI socket with no server name");
@@ -151,11 +144,11 @@ public class AFUNIXRMISocketFactory extends RMISocketFactory implements External
     public void close() {
     }
 
-    protected int newPort() throws IOException {
+    private int newPort() throws IOException {
         return generator.newPort();
     }
 
-    protected void returnPort(int port) throws IOException {
+    private void returnPort(int port) throws IOException {
         generator.returnPort(port);
     }
 
@@ -199,7 +192,7 @@ public class AFUNIXRMISocketFactory extends RMISocketFactory implements External
     private final class AnonymousServerSocket extends AFUNIXServerSocket {
         private final int returnPort;
 
-        protected AnonymousServerSocket(int returnPort) throws IOException {
+        AnonymousServerSocket(int returnPort) throws IOException {
             super();
             this.returnPort = returnPort;
         }

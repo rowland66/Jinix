@@ -21,13 +21,15 @@ import java.io.FileDescriptor;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 
 /**
  * JNI connector to native JNI C code.
  * 
  * @author Christian Kohlschütter
  */
-final class NativeUnixSocket {
+final class NativeUnixSocket
+    extends SocketAddress {
   private static boolean loaded = false;
 
   static {
@@ -110,9 +112,6 @@ final class NativeUnixSocket {
     } catch (final RuntimeException e) {
       throw e;
     } catch (final Exception e) {
-      if (e instanceof AFUNIXSocketException) {
-        throw (AFUNIXSocketException) e;
-      }
       throw new AFUNIXSocketException("Could not set port", e);
     }
     if (!setOk) {
