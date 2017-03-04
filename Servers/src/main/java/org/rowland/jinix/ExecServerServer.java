@@ -74,6 +74,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
 
         LookupResult lookup = this.ns.lookup(cmd);
         FileNameSpace fs = (FileNameSpace) lookup.remote;
+        StringBuilder redirectExecutable = new StringBuilder(128);
         FileChannel cmdFd = null;
         try {
             try {
@@ -84,12 +85,43 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                 throw new FileNotFoundException("File not found: '"+cmd+"'");
             }
 
-            if (!isValidExecutable(cmdFd)) {
+            if (!isValidExecutable(cmdFd, redirectExecutable)) {
                 throw new RemoteException("Invalid Jinix executable: " + cmd);
             }
         } finally {
             if (cmdFd != null) {
                 cmdFd.close();
+            }
+        }
+
+        if (redirectExecutable.length() > 0) {
+
+            // Move the cmd (which is a script) into the args array as the first element
+            String[] newArgs = new String[args.length+1];
+            newArgs[0] = cmd;
+            System.arraycopy(args, 0, newArgs, 1, args.length);
+            args = newArgs;
+
+            cmd = redirectExecutable.toString();
+            lookup = this.ns.lookup(cmd);
+            fs = (FileNameSpace) lookup.remote;
+            try {
+                try {
+                    cmdFd = fs.getFileChannel(lookup.remainingPath, StandardOpenOption.READ);
+                } catch (FileAlreadyExistsException e) {
+                    throw new RuntimeException("Internal Error",e); // should never happen
+                } catch (NoSuchFileException e) {
+                    throw new FileNotFoundException("File not found: '"+cmd+"'");
+                }
+
+                if (!isValidExecutable(cmdFd, null)) {
+                    throw new RemoteException("Invalid Jinix executable: " + cmd);
+                }
+
+            } finally {
+                if (cmdFd != null) {
+                    cmdFd.close();
+                }
             }
         }
 
@@ -258,8 +290,36 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
         return rtrn;
     }
 
-    private boolean isValidExecutable(FileChannel cmd) {
-        return true;
+    private boolean isValidExecutable(FileChannel cmd, StringBuilder redirectExecutable) {
+        try {
+            byte[] magicBytes = cmd.read(2);
+            if (magicBytes == null || magicBytes.length < 2) {
+                return false;
+            }
+            if (magicBytes[0] == 0x50 && magicBytes[1] == 0x4B) { // 'PK'
+                return true;
+            }
+            if (magicBytes[0] == 0x23 && magicBytes[1] == 0x21) { // '#!'
+                if (redirectExecutable == null) {
+                    return false; // Only 1 redirect executable supported.
+                }
+                int i = 0;
+                byte[] execBytes = new byte[128];
+                byte[] b = cmd.read(1);
+                while (b != null && b[0] != 0x0A) {
+                    redirectExecutable.append((char) b[0]);
+                    b = cmd.read(1);
+                }
+                if (b == null) {
+                    return false; // reaching the end of the file before a newline is invalid
+                }
+
+                return true;
+            }
+            return false;
+        } catch (RemoteException e) {
+            throw new RuntimeException("Internal error", e);
+        }
     }
 
     private static String[] compressCmdArgs(String[] args) {
