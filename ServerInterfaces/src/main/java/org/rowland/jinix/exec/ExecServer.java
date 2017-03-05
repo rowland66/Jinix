@@ -16,7 +16,7 @@ public interface ExecServer extends Remote {
     static final String SERVER_NAME = "/exec";
 
     int execTranslator(String cmd, String[] args, FileChannel translatorNode, String translatorNodePath)
-            throws FileNotFoundException, RemoteException;
+            throws FileNotFoundException, InvalidExecutableException, RemoteException;
 
     /**
      * Execute
@@ -39,7 +39,7 @@ public interface ExecServer extends Remote {
              FileChannel stdIn,
              FileChannel stdOut,
              FileChannel stdErr)
-            throws FileNotFoundException, RemoteException;
+            throws FileNotFoundException, InvalidExecutableException, RemoteException;
 
     ExecLauncherData execLauncherCallback(int pid) throws RemoteException;
 }

@@ -2,6 +2,7 @@ package org.rowland.jinix;
 
 import org.rowland.jinix.exec.ExecLauncherData;
 import org.rowland.jinix.exec.ExecServer;
+import org.rowland.jinix.exec.InvalidExecutableException;
 import org.rowland.jinix.naming.*;
 import org.rowland.jinix.proc.ProcessManager;
 
@@ -41,7 +42,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
 
     @Override
     public int execTranslator(String cmd, String[] args, FileChannel translatorNode, String translatorNodePath)
-            throws FileNotFoundException, RemoteException {
+            throws FileNotFoundException, InvalidExecutableException, RemoteException {
         return exec0(null, cmd, args, -1,
                 null, null, null,
                 translatorNode, translatorNodePath, "file://"+cmd);
@@ -55,7 +56,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                     FileChannel stdIn,
                     FileChannel stdOut,
                     FileChannel stdErr)
-            throws FileNotFoundException, RemoteException {
+            throws FileNotFoundException, InvalidExecutableException, RemoteException {
         return exec0(env, cmd, args, parentId, stdIn, stdOut, stdErr, null, null, null);
     }
 
@@ -69,7 +70,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                       FileChannel translatorNode,
                       String translatorNodePath,
                       String codebaseURL)
-            throws FileNotFoundException, RemoteException {
+            throws FileNotFoundException, InvalidExecutableException, RemoteException {
         Runtime runtime = Runtime.getRuntime();
 
         LookupResult lookup = this.ns.lookup(cmd);
@@ -86,7 +87,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
             }
 
             if (!isValidExecutable(cmdFd, redirectExecutable)) {
-                throw new RemoteException("Invalid Jinix executable: " + cmd);
+                throw new InvalidExecutableException(cmd);
             }
         } finally {
             if (cmdFd != null) {
@@ -115,7 +116,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                 }
 
                 if (!isValidExecutable(cmdFd, null)) {
-                    throw new RemoteException("Invalid Jinix executable: " + cmd);
+                    throw new InvalidExecutableException(cmd);
                 }
 
             } finally {

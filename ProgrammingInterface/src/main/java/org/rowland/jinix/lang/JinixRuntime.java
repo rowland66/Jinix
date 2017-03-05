@@ -1,5 +1,6 @@
 package org.rowland.jinix.lang;
 
+import org.rowland.jinix.exec.InvalidExecutableException;
 import org.rowland.jinix.fifo.FileChannelPair;
 import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixPipe;
@@ -76,11 +77,12 @@ public abstract class JinixRuntime {
      * @return the Jinix process ID of the new process.
      * @throws FileNotFoundException if the Jinix executable image cannot be located
      */
-    public abstract int exec(String cmd, String[] args) throws FileNotFoundException;
+    public abstract int exec(String cmd, String[] args)
+            throws FileNotFoundException, InvalidExecutableException;
 
     public abstract int exec(Properties env, String cmd, String[] args,
                              JinixFileDescriptor stdin, JinixFileDescriptor stdout, JinixFileDescriptor stderr)
-            throws FileNotFoundException;
+            throws FileNotFoundException, InvalidExecutableException;
 
     /**
      * Execute the current Jinix executable image in a new process. This is not a true fork as
@@ -89,7 +91,7 @@ public abstract class JinixRuntime {
      *
      * @return the Jinix process ID of the new process.
      */
-    public abstract int fork() throws FileNotFoundException;
+    public abstract int fork() throws FileNotFoundException, InvalidExecutableException;
 
     /**
      *

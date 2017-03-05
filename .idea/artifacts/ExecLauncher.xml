@@ -1,6 +1,6 @@
 <component name="ArtifactManager">
   <artifact type="jar" build-on-make="true" name="ExecLauncher">
-    <output-path>$PROJECT_DIR$/lib</output-path>
+    <output-path>$PROJECT_DIR$/../lib</output-path>
     <root id="archive" name="ExecLauncher.jar">
       <element id="module-output" name="ExecLauncher" />
     </root>

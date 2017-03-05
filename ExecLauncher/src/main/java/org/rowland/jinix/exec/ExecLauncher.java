@@ -420,7 +420,7 @@ public class ExecLauncher {
         }
 
         @Override
-        public int exec(String cmd, String[] args) throws FileNotFoundException {
+        public int exec(String cmd, String[] args) throws FileNotFoundException, InvalidExecutableException {
 
             return exec(JinixSystem.getJinixProperties(), cmd, args, null, null, null);
         }
@@ -428,7 +428,7 @@ public class ExecLauncher {
         @Override
         public int exec(Properties environment, String cmd, String[] args,
                         JinixFileDescriptor stdin, JinixFileDescriptor stdout, JinixFileDescriptor stderr)
-            throws FileNotFoundException {
+            throws FileNotFoundException, InvalidExecutableException {
             try {
 
                 if (stdin == null) stdin = ExecLauncher.stdIn;
@@ -450,7 +450,7 @@ public class ExecLauncher {
         }
 
         @Override
-        public int fork() throws FileNotFoundException {
+        public int fork() throws FileNotFoundException, InvalidExecutableException {
             JinixSystem.setJinixProperty(JINIX_FORK, Integer.toString(pid));
             Properties environ = JinixSystem.getJinixProperties();
             return exec(environ, execCmd, execArgs, null, null, null);

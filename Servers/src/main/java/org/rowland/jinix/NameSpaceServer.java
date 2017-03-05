@@ -1,6 +1,7 @@
 package org.rowland.jinix;
 
 import org.rowland.jinix.exec.ExecServer;
+import org.rowland.jinix.exec.InvalidExecutableException;
 import org.rowland.jinix.naming.*;
 import org.rowland.jinix.proc.ProcessManager;
 
@@ -80,7 +81,8 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
     }
 
     @Override
-    public void bindTranslator(String path, String cmd, String[] args, EnumSet<BindTranslatorOption> options) throws FileNotFoundException, RemoteException {
+    public void bindTranslator(String path, String cmd, String[] args, EnumSet<BindTranslatorOption> options)
+            throws FileNotFoundException, InvalidExecutableException, RemoteException {
 
         if (!path.startsWith("/")) {
             throw new IllegalArgumentException("bindTranslator path must be absolute: "+path);
@@ -145,7 +147,9 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
             try {
                 startTranslator(td); // startTranslator() will populate remote in the TranslatorDefinition
             } catch (InterruptedException e) {
-                throw new RemoteException("Interrupted waiting for translator to register: "+path);
+                throw new RemoteException("Interrupted waiting for translator to register: " + path);
+            } catch (InvalidExecutableException e) {
+
             } catch (IOException e) {
                 throw new RemoteException("IOException starting translator: "+path,e);
             }
@@ -164,7 +168,7 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
             try {
                 RemainingPath remainingPath = new RemainingPath("");
                 obj = lookupInternal(path, remainingPath, false);
-            } catch (FileNotFoundException e) {
+            } catch (FileNotFoundException | InvalidExecutableException e) {
                 // We should never get this exception since we are not activating translators
             }
 
@@ -211,7 +215,7 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
         Object obj = null;
         try {
             obj = lookupInternal(path, remainingPath, true);
-        } catch (FileNotFoundException e) {
+        } catch (FileNotFoundException | InvalidExecutableException e) {
             // This means a translator executable cannot be found throw IOException
             throw new RemoteException("NameSpaceServer: translator executable not found", e);
         }
@@ -239,7 +243,7 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
     }
 
     private Object lookupInternal(String path, RemainingPath remainingPath, boolean activateTranslators)
-            throws FileNotFoundException, RemoteException {
+            throws FileNotFoundException, InvalidExecutableException, RemoteException {
 
         String parentPath = path;
         while (!parentPath.isEmpty()) {
@@ -309,7 +313,8 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
         }
     }
 
-    private void startTranslator(TranslatorDefinition td) throws InterruptedException, FileNotFoundException, IOException {
+    private void startTranslator(TranslatorDefinition td)
+            throws InterruptedException, InvalidExecutableException, IOException {
         ExecServer es = (ExecServer) lookup(ExecServer.SERVER_NAME).remote;
 
         Map<String,String> env = new HashMap<String,String>();
@@ -339,7 +344,7 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
 
         try {
             td.pid = es.execTranslator(cmd, execArgs, fc, td.node);
-        } catch (FileNotFoundException | RemoteException e) {
+        } catch (FileNotFoundException | InvalidExecutableException | RemoteException e) {
             throw e;
         }
 
