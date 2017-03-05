@@ -80,6 +80,20 @@ public abstract class JinixRuntime {
     public abstract int exec(String cmd, String[] args)
             throws FileNotFoundException, InvalidExecutableException;
 
+    /**
+     * Execute a Jinix executable image in a new process providing a customized environment,
+     * input, output and error file descriptors.
+     *
+     * @param env
+     * @param cmd
+     * @param args
+     * @param stdin
+     * @param stdout
+     * @param stderr
+     * @return
+     * @throws FileNotFoundException
+     * @throws InvalidExecutableException
+     */
     public abstract int exec(Properties env, String cmd, String[] args,
                              JinixFileDescriptor stdin, JinixFileDescriptor stdout, JinixFileDescriptor stderr)
             throws FileNotFoundException, InvalidExecutableException;
@@ -94,10 +108,13 @@ public abstract class JinixRuntime {
     public abstract int fork() throws FileNotFoundException, InvalidExecutableException;
 
     /**
+     * Was the current process started as a fork of a parent process.
      *
-     * @return
+     * @return true if the current process is a fork of a parent process
      */
     public abstract boolean isForkChild();
+
+    public abstract int getPid();
 
     public abstract int waitForChild();
 

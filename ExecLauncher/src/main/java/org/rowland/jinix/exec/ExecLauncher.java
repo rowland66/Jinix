@@ -467,6 +467,11 @@ public class ExecLauncher {
         }
 
         @Override
+        public int getPid() {
+            return pid;
+        }
+
+        @Override
         public int waitForChild() {
             try {
                 return pm.waitForChild(ExecLauncher.pid);
