@@ -15,7 +15,9 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardOpenOption;
 import java.rmi.RemoteException;
 import java.util.*;
+import java.util.logging.Logger;
 
+import static org.rowland.jinix.JinixKernel.consoleLogging;
 import static org.rowland.jinix.JinixKernel.rmiMode;
 
 /**
@@ -27,6 +29,7 @@ import static org.rowland.jinix.JinixKernel.rmiMode;
  */
 class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecServer {
 
+    static Logger logger = Logger.getLogger("jinix.ExecServer");
     private String javaHome;
     private NameSpace ns;
     private ProcessManager pm;
@@ -185,6 +188,10 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
             cmdList.add("rmi=Default");
         }
 
+        if (consoleLogging) {
+            cmdList.add("consoleLogging");
+        }
+
         String[] cmdArray = cmdList.toArray(new String[cmdList.size()]);
 
         if (env == null) {
@@ -212,16 +219,16 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
             (new Thread(new Runnable() {
                 public void run() {
                     try {
-                        System.out.println("Waiting for osProcess: "+pid);
+                        logger.fine("Waiting for osProcess: "+pid);
                         osProcess.waitFor();
                     } catch (InterruptedException e) {
                         return;
                     }
                     try {
-                        System.out.println("Deregistering process: " +pid );
+                        logger.fine("Deregistering process: " +pid );
                         pm.deRegisterProcess(pid);
                     } catch (RemoteException e) {
-                        System.err.println("ExecServer: RemoteExeception deregistering process: "+pid);
+                        logger.fine("ExecServer: RemoteExeception deregistering process: "+pid);
                     }
                 }
             })).start();

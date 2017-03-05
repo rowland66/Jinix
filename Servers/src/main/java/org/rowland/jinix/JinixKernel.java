@@ -1,6 +1,7 @@
 package org.rowland.jinix;
 
 import org.rowland.jinix.exec.ExecServer;
+import org.rowland.jinix.logger.LogServer;
 import org.rowland.jinix.naming.FileNameSpace;
 import org.rowland.jinix.proc.ProcessManager;
 
@@ -15,6 +16,9 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.RMISocketFactory;
 import java.rmi.server.UnicastRemoteObject;
+import java.util.logging.Handler;
+import java.util.logging.LogManager;
+import java.util.logging.Logger;
 
 /**
  * The three core server that constitute the Jinix kernel. The server are NameSpace, ProcessManager
@@ -26,16 +30,22 @@ public class JinixKernel {
     protected enum RMI_MODE {Default, AFUNIX};
 
     protected static RMI_MODE rmiMode = RMI_MODE.Default;
+    static boolean consoleLogging = false;
 
     private static Thread mainThread;
     private static Registry registry;
     private static NameSpaceServer fs;
+    private static LogServerServer ls;
     private static ProcessManagerServer pm;
     private static ExecServerServer es;
     private static boolean shutdown = false;
 
+    private static Logger logger = Logger.getLogger("jinix");
+
     public static void main(String[] args) {
         try {
+            setupLogging(args);
+
             setupRMI("JinixKernel", args);
 
             if (RMISocketFactory.getSocketFactory() != null &&
@@ -53,22 +63,27 @@ public class JinixKernel {
 
             registry.rebind("root", fs);
 
-            System.out.println("NameSpace: Started");
+            logger.info("NameSpace: Started");
+
+            ls = new LogServerServer();
+            fs.bind(LogServer.SERVER_NAME, ls);
+
+            logger.info("LogServer: Started and bound to root namespace at " + LogServer.SERVER_NAME);
 
             pm = new ProcessManagerServer();
             fs.bind(ProcessManager.SERVER_NAME, pm);
 
-            System.out.println("ProcessManager: Started and bound to root namespace at " + ProcessManager.SERVER_NAME);
+            logger.info("ProcessManager: Started and bound to root namespace at " + ProcessManager.SERVER_NAME);
 
             String javaHome = System.getenv("JAVA_HOME");
             if (javaHome != null) {
-                System.out.println("ExecServer: Executing java from: "+javaHome);
+                logger.info("ExecServer: Executing java from: "+javaHome);
             }
 
             es = new ExecServerServer(fs, javaHome);
             fs.bind(ExecServer.SERVER_NAME, es);
 
-            System.out.println("ExecServer: Started and bound to root namespace at " + ExecServer.SERVER_NAME);
+            logger.info("ExecServer: Started and bound to root namespace at " + ExecServer.SERVER_NAME);
 
             Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
                 @Override
@@ -84,12 +99,12 @@ public class JinixKernel {
             try {
                 Thread.sleep(Integer.MAX_VALUE);
             } catch (InterruptedException e) {
-                System.out.println("Jinix Kernel Halted");
+                logger.info("Jinix Kernel Halted");
                 System.exit(0);
             }
 
         } catch (ConnectException e) {
-            System.err.println("NameSpace: Failed to bind to RMI Registry.");
+            logger.severe("NameSpace: Failed to bind to RMI Registry.");
         } catch (RemoteException e) {
             e.printStackTrace();
         }
@@ -98,18 +113,18 @@ public class JinixKernel {
     static void shutdown() {
         pm.shutdown();
         try {
-
             fs.unbind(ExecServer.SERVER_NAME);
             fs.unbind(ProcessManager.SERVER_NAME);
-            pm.unexport();
+            fs.unbind(LogServer.SERVER_NAME);
             es.unexport();
+            pm.unexport();
+            ls.unexport();
             registry.unbind("root");
             fs.unexport();
             UnicastRemoteObject.unexportObject(registry, true);
             shutdown = true;
             JinixKernelUnicastRemoteObject.dumpExportedObjects(System.out);
             mainThread.interrupt();
-
         } catch (NoSuchObjectException e) {
             e.printStackTrace();
         } catch (NotBoundException e) {
@@ -117,6 +132,28 @@ public class JinixKernel {
         } catch (RemoteException e) {
             e.printStackTrace();
         }
+    }
+
+    private static void setupLogging(String[] args) {
+
+        Logger rootLogger = LogManager.getLogManager().getLogger("");
+
+        for (int i =0; i<args.length; i++) {
+            if (args[i].equals("-i") || args[i].equals("--interactive")) {
+                rootLogger.getHandlers()[0].setFormatter(new BriefKernelLogFormatter());
+                consoleLogging = true;
+                return; // Leave the defaule ConsoleHandler in place and log to the console
+            }
+        }
+
+        //Clear all existing handlers
+        Handler[] oldHandler = rootLogger.getHandlers();
+        for (Handler h : oldHandler) {
+            rootLogger.removeHandler(h);
+        }
+
+        Handler memHandler = LogServerServer.kernelLoggingHandler;
+        rootLogger.addHandler(memHandler);
     }
 
     protected static void setupRMI(String serverName, String[] args) {
@@ -147,7 +184,7 @@ public class JinixKernel {
                 } catch (IOException e) {
                     throw new RuntimeException("IOException setting RMI socket factory", e);
                 }
-                System.out.println("Initialized "+serverName+" for RMI over AFUNIX sockets");
+                logger.info("Initialized "+serverName+" for RMI over AFUNIX sockets");
             }
         }
     }

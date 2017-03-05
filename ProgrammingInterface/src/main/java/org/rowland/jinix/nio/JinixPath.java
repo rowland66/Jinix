@@ -37,6 +37,10 @@ public class JinixPath implements Path {
     // array of offsets of elements in path (created lazily)
     private volatile int[] offsets;
 
+    public JinixPath(String input) {
+        this(new JinixFileSystem(), encode(normalizeAndCheck(input)));
+    }
+
     JinixPath(JinixFileSystem fs, byte[] path) {
         this.fs = fs;
         this.path = path;
@@ -44,7 +48,7 @@ public class JinixPath implements Path {
 
     JinixPath(JinixFileSystem fs, String input) {
         // removes redundant slashes and checks for invalid characters
-        this(fs, encode(fs, normalizeAndCheck(input)));
+        this(fs, encode(normalizeAndCheck(input)));
     }
 
     // package-private
@@ -92,7 +96,7 @@ public class JinixPath implements Path {
     }
 
     // encodes the given path-string into a sequence of bytes
-    private static byte[] encode(JinixFileSystem fs, String input) {
+    private static byte[] encode(String input) {
         SoftReference<CharsetEncoder> ref = encoder.get();
         CharsetEncoder ce = (ref != null) ? ref.get() : null;
         if (ce == null) {
@@ -102,7 +106,7 @@ public class JinixPath implements Path {
             encoder.set(new SoftReference<CharsetEncoder>(ce));
         }
 
-        char[] ca = fs.normalizeNativePath(input.toCharArray());
+        char[] ca = input.toCharArray();
 
         // size output buffer for worse-case size
         byte[] ba = new byte[(int)(ca.length * (double)ce.maxBytesPerChar())];

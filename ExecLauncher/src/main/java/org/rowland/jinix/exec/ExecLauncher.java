@@ -9,6 +9,7 @@ import org.rowland.jinix.lang.JinixRuntime;
 import org.rowland.jinix.lang.JinixSystem;
 import org.rowland.jinix.lang.ProcessSignalHandler;
 import org.rowland.jinix.naming.*;
+import org.rowland.jinix.nio.JinixPath;
 import org.rowland.jinix.proc.ProcessManager;
 
 import javax.naming.Context;
@@ -18,6 +19,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.nio.file.Path;
 import java.rmi.NotBoundException;
 import java.rmi.Remote;
 import java.rmi.RemoteException;
@@ -26,7 +28,9 @@ import java.rmi.registry.Registry;
 import java.rmi.server.RMISocketFactory;
 import java.security.Policy;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.Properties;
+import java.util.logging.*;
 
 /**
  * ExecLauncher bootstraps every Jinix executable started by the ExecServer. The ExecLauncher calls back to the
@@ -48,6 +52,7 @@ public class ExecLauncher {
     private static String translatorNodePath;
     private static ThreadGroup execThreadGroup;
     private static boolean nativeAccess = false;
+    private static boolean consoleLogging = false;
 
     private static InputStream debugStdin;
     private static PrintStream debugStdOut;
@@ -60,6 +65,10 @@ public class ExecLauncher {
     public static void launch(int pid) {
 
         try {
+            Runtime.getRuntime().addShutdownHook(new ExecLauncherShutdownThread());
+
+            JinixRuntime.setJinixRuntime(new JinixRuntimeImpl());
+
             ExecLauncher.pid = pid;
 
             ExecLauncherData execLaunchData = es.execLauncherCallback(pid);
@@ -98,12 +107,11 @@ public class ExecLauncher {
                         break;
                     }
                 }
-
+                setupTranslatorLogging(translatorNodePath);
+                System.setIn(null);
+                System.setOut(new PrintStream(new LoggingOutputStream(Logger.getLogger(""))));
+                System.setErr(new PrintStream(new LoggingOutputStream(Logger.getLogger(""))));
             }
-
-            Runtime.getRuntime().addShutdownHook(new ExecLauncherShutdownThread());
-
-            JinixRuntime.setJinixRuntime(new JinixRuntimeImpl());
 
             URL.setURLStreamHandlerFactory(new ExecStreamHandlerFactory());
 
@@ -279,6 +287,48 @@ public class ExecLauncher {
         }
     }
 
+    /**
+     * Translators have no standard input, output or error. Therefore, we need
+     * to setup their default logging so that the console logger is removed. Instead,
+     * each translator logs to its synthetic server name in the /var/log directory.
+     */
+    private static void setupTranslatorLogging(String translatorNodePath) {
+        Logger rootLogger = LogManager.getLogManager().getLogger("");
+
+        if (consoleLogging) {
+            // The first and only handler should be the ConsoleHandler.
+            rootLogger.getHandlers()[0].setFormatter(
+                    new BriefExecLauncherLogFormatter(getTranslatorServerName(translatorNodePath)));
+            return;
+        }
+        //Clear all existing handlers
+        Handler[] oldHandler = rootLogger.getHandlers();
+        for (Handler h : oldHandler) {
+            rootLogger.removeHandler(h);
+        }
+
+        String logFileName = "/var/log/" + getTranslatorServerName(translatorNodePath) + ".log";
+        try {
+            Path logFilePath = new JinixPath(logFileName);
+            rootLogger.addHandler(new ExecLauncherLoggingHandler(logFilePath));
+        } catch (IOException e) {
+            // Ignore any IO Errors. We will have not logging, but there is no way to
+            // tell anyone.
+        }
+    }
+
+    private static String getTranslatorServerName(String translatorNodePath) {
+        if (translatorNodePath.startsWith("/")) {
+            translatorNodePath = translatorNodePath.substring(1);
+        }
+        translatorNodePath = translatorNodePath.replace('/','-');
+        if (translatorNodePath.lastIndexOf('.') > -1) {
+            translatorNodePath = translatorNodePath.substring(0,
+                    translatorNodePath.lastIndexOf('.')-1);
+        }
+        return translatorNodePath;
+    }
+
     public static void main(String[] args) {
 
         if (args.length < 2) {
@@ -404,6 +454,24 @@ public class ExecLauncher {
                 // Since the main ExecLauncher thread is waiting on a signal, send an abort signal.
                 JinixRuntime.getRuntime().sendSignal(pid, ProcessManager.Signal.ABORT);
             }
+        }
+    }
+
+    private static class BriefExecLauncherLogFormatter extends Formatter {
+        private static final String DEFAULT_FORMAT =
+                "%1$tH:%1$tM:%1$tS %2$s: %3$s: %4$s%n";
+        String name;
+
+        private BriefExecLauncherLogFormatter(String translatorName) {
+            name = translatorName;
+        }
+        @Override
+        public synchronized String format(LogRecord record) {
+            return String.format(DEFAULT_FORMAT,
+                    new Date(record.getMillis()),
+                    name + (!record.getLoggerName().isEmpty() ? "-"+record.getLoggerName() : ""),
+                    record.getLevel().getLocalizedName(),
+                    formatMessage(record));
         }
     }
 

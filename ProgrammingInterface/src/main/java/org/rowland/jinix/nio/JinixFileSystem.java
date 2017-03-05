@@ -13,20 +13,27 @@ import java.util.*;
 import java.util.regex.Pattern;
 
 /**
- * Created by rsmith on 1/7/2017.
+ * An implementation FileSystem that may overlay the existing platform default
+ * FileSystem.
  */
 public class JinixFileSystem extends FileSystem {
 
     private final JinixFileSystemProvider provider;
-    private FileSystem defaultFileSystem;
+    private FileSystem defaultFileSystem; // this field can be null
     private byte[] defaultDirectory = null;
     private final JinixPath rootDirectory;
+
+    public JinixFileSystem() {
+        this(new JinixFileSystemProvider(null));
+    }
 
     // package-private
     JinixFileSystem(JinixFileSystemProvider provider) {
         this.provider = provider;
-        this.defaultFileSystem = provider.getDefaultFileSystemProvider().getFileSystem(URI.create("file:///"));
-
+        if (provider.getDefaultFileSystemProvider() != null) {
+            this.defaultFileSystem = provider.getDefaultFileSystemProvider().
+                    getFileSystem(URI.create("file:///"));
+        }
         // the root directory
         this.rootDirectory = new JinixPath(this, "/");
     }
@@ -53,6 +60,9 @@ public class JinixFileSystem extends FileSystem {
 
     @Override
     public final String getSeparator() {
+        if (defaultFileSystem == null) {
+            return "/";
+        }
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
             try {
@@ -68,6 +78,10 @@ public class JinixFileSystem extends FileSystem {
 
     @Override
     public final boolean isOpen() {
+        if (defaultFileSystem == null) {
+            return true;
+        }
+
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
             try {
@@ -82,6 +96,9 @@ public class JinixFileSystem extends FileSystem {
 
     @Override
     public final boolean isReadOnly() {
+        if (defaultFileSystem == null) {
+            return false;
+        }
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
             try {
@@ -96,6 +113,9 @@ public class JinixFileSystem extends FileSystem {
 
     @Override
     public final void close() throws IOException {
+        if (defaultFileSystem == null) {
+            throw new UnsupportedOperationException();
+        }
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
             try {
@@ -113,6 +133,9 @@ public class JinixFileSystem extends FileSystem {
      */
     @Override
     public final Iterable<Path> getRootDirectories() {
+        if (defaultFileSystem == null) {
+            return getRootDirectoriesInternal();
+        }
 
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
@@ -146,6 +169,9 @@ public class JinixFileSystem extends FileSystem {
 
     @Override
     public final Iterable<FileStore> getFileStores() {
+        if (defaultFileSystem == null) {
+            return null;
+        }
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
             try {
@@ -160,6 +186,9 @@ public class JinixFileSystem extends FileSystem {
 
     @Override
     public Path getPath(String first, String... more) {
+        if (defaultFileSystem == null) {
+            return getPathInternal(first, more);
+        }
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
             try {
@@ -193,6 +222,9 @@ public class JinixFileSystem extends FileSystem {
 
     @Override
     public PathMatcher getPathMatcher(String syntaxAndPattern) {
+        if (defaultFileSystem == null) {
+            return getPathMatcherInternal(syntaxAndPattern);
+        }
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
             try {
@@ -240,6 +272,9 @@ public class JinixFileSystem extends FileSystem {
 
     @Override
     public final UserPrincipalLookupService getUserPrincipalLookupService() {
+        if (defaultFileSystem == null) {
+            return null;
+        }
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
             try {
@@ -274,6 +309,9 @@ public class JinixFileSystem extends FileSystem {
 
     @Override
     public Set<String> supportedFileAttributeViews() {
+        if (defaultFileSystem == null) {
+            return Collections.EMPTY_SET;
+        }
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
             try {
@@ -288,6 +326,9 @@ public class JinixFileSystem extends FileSystem {
 
     @Override
     public WatchService newWatchService() throws IOException {
+        if (defaultFileSystem == null) {
+            return null;
+        }
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
             try {
