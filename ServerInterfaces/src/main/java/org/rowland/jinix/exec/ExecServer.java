@@ -14,6 +14,7 @@ import java.util.Properties;
 public interface ExecServer extends Remote {
 
     static final String SERVER_NAME = "/exec";
+    static final String SERVER_LOGGER = "jinix.exec";
 
     int execTranslator(String cmd, String[] args, FileChannel translatorNode, String translatorNodePath)
             throws FileNotFoundException, InvalidExecutableException, RemoteException;

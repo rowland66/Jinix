@@ -10,6 +10,8 @@ import java.nio.file.*;
 import java.rmi.Remote;
 import java.rmi.RemoteException;
 import java.util.*;
+import java.util.logging.LogManager;
+import java.util.logging.Logger;
 
 /**
  * A server that provides the OS naming service. The NameSpaceServer provides a hierarchicle name space that
@@ -18,6 +20,8 @@ import java.util.*;
  * in the underlying file system with the same name.
  */
 class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpace {
+
+    private static final Logger logger = Logger.getLogger(SERVER_LOGGER);
 
     private final Path TRANSLATOR_CONFIG_PATH = Paths.get("./config/translator.config");
     private final Properties translatorConfig = new Properties();
@@ -339,7 +343,7 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
 
         FileChannel fc = null;
         if (rootFileSystem.getFileAttributes(td.node).type == DirectoryFileData.FileType.FILE) {
-            fc = rootFileSystem.getFileChannel(td.node, StandardOpenOption.READ);
+            fc = rootFileSystem.getFileChannel(td.node, StandardOpenOption.READ, StandardOpenOption.WRITE);
         }
 
         try {
@@ -357,6 +361,8 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
                 }
             }
         }
+
+        logger.info("Successfully started translator "+td.command + " at: "+td.node);
     }
 
     private void terminateTranslator(int pid) {

@@ -6,6 +6,8 @@ import org.rowland.jinix.proc.EventNotificationHandler;
 import org.rowland.jinix.proc.ProcessManager;
 
 import java.io.FileNotFoundException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.*;
 import java.rmi.Remote;
 import java.rmi.RemoteException;
@@ -22,7 +24,7 @@ import java.util.logging.Logger;
  */
 class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements ProcessManager, FileNameSpace {
 
-    static Logger logger = Logger.getLogger("ProcessManager");
+    static Logger logger = Logger.getLogger(SERVER_LOGGER);
 
     private State state;
     private NameSpace ns;
@@ -298,6 +300,15 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
     }
 
     @Override
+    public URI getURI() throws RemoteException {
+        try {
+            return new URI("file", null, ProcessManager.SERVER_NAME, null);
+        } catch (URISyntaxException e) {
+            throw new RemoteException("Unexpected failure creating FileNameSpace URI", e);
+        }
+    }
+
+    @Override
     public DirectoryFileData getFileAttributes(String name) throws NoSuchFileException, RemoteException {
         if (!name.startsWith("/")) {
             throw new RemoteException("Invalid file name: "+name);
@@ -397,6 +408,11 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
 
     @Override
     public void delete(String name) throws NoSuchFileException, DirectoryNotEmptyException, RemoteException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void copy(String name, String pathNameTo, CopyOption... options) throws FileAlreadyExistsException, RemoteException {
         throw new UnsupportedOperationException();
     }
 

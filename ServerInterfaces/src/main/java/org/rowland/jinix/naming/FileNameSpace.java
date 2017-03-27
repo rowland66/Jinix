@@ -1,5 +1,6 @@
 package org.rowland.jinix.naming;
 
+import java.net.URI;
 import java.nio.file.*;
 import java.rmi.Remote;
 import java.rmi.RemoteException;
@@ -8,6 +9,16 @@ import java.rmi.RemoteException;
  * Primary interface for a Jinix file system.
  */
 public interface FileNameSpace extends Remote {
+
+    /**
+     * Return the URI that uniquely identifies the FileNameSpace in the system. The URI
+     * scheme should be file, and the path should be unique within the system. Usually,
+     * the path to the block device or file providing data for the FileNameSpace should
+     * be adequate.
+     *
+     * @return a URI with scheme 'file' that uniquely identifies the FileNameSpace in the system
+     */
+    URI getURI() throws RemoteException;
 
     DirectoryFileData getFileAttributes(String name) throws NoSuchFileException, RemoteException;
 
@@ -27,7 +38,11 @@ public interface FileNameSpace extends Remote {
 
     void delete(String name) throws NoSuchFileException, DirectoryNotEmptyException, RemoteException;
 
-    void move(String nameFrom, String pathNameTo, CopyOption... options) throws NoSuchFileException, FileAlreadyExistsException, RemoteException;
+    void copy(String nameFrom, String pathNameTo, CopyOption... options)
+            throws NoSuchFileException, FileAlreadyExistsException, UnsupportedOperationException, RemoteException;
+
+    void move(String nameFrom, String pathNameTo, CopyOption... options)
+            throws NoSuchFileException, FileAlreadyExistsException, UnsupportedOperationException, RemoteException;
 
     FileChannel getFileChannel(String name, OpenOption... options) throws FileAlreadyExistsException, NoSuchFileException, RemoteException;
 

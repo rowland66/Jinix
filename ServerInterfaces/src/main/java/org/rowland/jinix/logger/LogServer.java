@@ -20,7 +20,7 @@ public interface LogServer extends Remote {
      */
     String[] getLogs(int count) throws RemoteException;
 
-    void setLevel(String server, String levelName) throws RemoteException;
+    void setLevel(String server, String levelName) throws UnknownLoggerException, RemoteException;
 
-    int getLevel(String server) throws RemoteException;
+    int getLevel(String server) throws UnknownLoggerException, RemoteException;
 }

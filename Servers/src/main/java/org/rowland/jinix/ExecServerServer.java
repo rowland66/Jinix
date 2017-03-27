@@ -29,7 +29,7 @@ import static org.rowland.jinix.JinixKernel.rmiMode;
  */
 class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecServer {
 
-    static Logger logger = Logger.getLogger("jinix.ExecServer");
+    static Logger logger = Logger.getLogger(SERVER_LOGGER);
     private String javaHome;
     private NameSpace ns;
     private ProcessManager pm;

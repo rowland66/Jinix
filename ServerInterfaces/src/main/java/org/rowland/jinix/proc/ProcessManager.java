@@ -9,6 +9,7 @@ import java.rmi.RemoteException;
 public interface ProcessManager extends Remote {
 
     public final String SERVER_NAME = "/proc";
+    public final String SERVER_LOGGER = "jinix.proc";
 
     public enum EventName {CHILD, DEREGISTER};
 

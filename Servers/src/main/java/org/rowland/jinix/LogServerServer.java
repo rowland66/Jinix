@@ -1,7 +1,9 @@
 package org.rowland.jinix;
 
 import org.rowland.jinix.logger.LogServer;
+import org.rowland.jinix.logger.UnknownLoggerException;
 
+import java.net.UnknownServiceException;
 import java.rmi.RemoteException;
 import java.util.Date;
 import java.util.logging.Formatter;
@@ -42,21 +44,33 @@ public class LogServerServer extends JinixKernelUnicastRemoteObject implements L
     }
 
     @Override
-    public void setLevel(String server, String level) throws RemoteException {
+    public void setLevel(String server, String level) throws UnknownLoggerException, RemoteException {
         Logger l = Logger.getLogger(server);
-        if (l != null) {
-            try {
-                l.setLevel(Level.parse(level));
-            } catch (IllegalArgumentException e) {
-                // Ignore this error, and don't set the level
-            }
+
+        if (l == null) {
+            throw new UnknownLoggerException(server);
+        }
+
+        try {
+            l.setLevel(Level.parse(level));
+        } catch (IllegalArgumentException e) {
+            // Ignore this error, and don't set the level
         }
     }
 
     @Override
-    public int getLevel(String server) throws RemoteException {
+    public int getLevel(String server) throws UnknownLoggerException, RemoteException {
         Logger l = Logger.getLogger(server);
-        if (l != null) {
+
+        if (l == null) {
+            throw new UnknownLoggerException(server);
+        }
+
+        while (l.getLevel() == null && l.getParent() != null) {
+            l = l.getParent();
+        }
+
+        if (l.getLevel() != null) {
             return l.getLevel().intValue();
         }
         return -1;

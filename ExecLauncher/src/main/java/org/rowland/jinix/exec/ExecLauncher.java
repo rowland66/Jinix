@@ -581,6 +581,11 @@ public class ExecLauncher {
         }
 
         @Override
+        public String getTranslatorNodePath() {
+            return translatorNodePath;
+        }
+
+        @Override
         public void bindTranslator(Remote translator) {
             try {
                 rootNameSpace.bind(translatorNodePath, translator);

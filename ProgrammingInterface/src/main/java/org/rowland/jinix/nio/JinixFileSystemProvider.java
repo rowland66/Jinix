@@ -136,7 +136,7 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     private DirectoryStream<Path> newDirectoryStreamInternal(Path dir, DirectoryStream.Filter<? super Path> filter)
             throws IOException {
         LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
-                dir.toAbsolutePath().toString());
+                dir.normalize().toAbsolutePath().toString());
         FileNameSpace fns = (FileNameSpace) lookup.remote;
         final String[] dirList = fns.list(lookup.remainingPath);
         return new DirectoryStream<Path>() {
@@ -235,7 +235,7 @@ public class JinixFileSystemProvider extends FileSystemProvider {
 
     private void createDirectoryInternal(Path dir, FileAttribute<?>[] attrs) throws IOException {
         LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
-                dir.toAbsolutePath().toString());
+                dir.normalize().toAbsolutePath().toString());
         FileNameSpace fns = (FileNameSpace) lookup.remote;
         fns.createDirectory(lookup.remainingPath);
     }
@@ -266,7 +266,7 @@ public class JinixFileSystemProvider extends FileSystemProvider {
 
     private void deleteInternal(Path path) throws IOException {
         LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
-                path.toAbsolutePath().toString());
+                path.normalize().toAbsolutePath().toString());
         FileNameSpace fns = (FileNameSpace) lookup.remote;
         fns.delete(lookup.remainingPath);
     }
@@ -274,24 +274,35 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     @Override
     public void copy(Path source, Path target, CopyOption... options) throws IOException {
         if (defaultFileSystemProvider == null) {
-            throw new UnsupportedOperationException("JinixFileSystemProvider.copy()");
+            copyInternal(source, target, options);
+            return;
         }
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
             try {
                 securityManager.checkPermission(new JinixNativeAccessPermission());
             } catch (AccessControlException e) {
-                throw new UnsupportedOperationException("JinixFileSystemProvider.copy()");
+                copyInternal(source, target, options);
+                return;
             }
         }
 
         defaultFileSystemProvider.copy(source, target, options);
     }
 
+    private void copyInternal(Path source, Path target, CopyOption... options) throws IOException {
+        LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
+                source.normalize().toAbsolutePath().toString());
+        FileNameSpace fns = (FileNameSpace) lookup.remote;
+        fns.copy(lookup.remainingPath, target.normalize().toAbsolutePath().toString(), options);
+    }
+
+
     @Override
     public void move(Path source, Path target, CopyOption... options) throws IOException {
         if (defaultFileSystemProvider == null) {
             moveInternal(source, target, options);
+            return;
         }
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
@@ -314,9 +325,9 @@ public class JinixFileSystemProvider extends FileSystemProvider {
 
     private void moveInternal(Path source, Path target, CopyOption... options) throws IOException {
         LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
-                source.toAbsolutePath().toString());
+                source.normalize().toAbsolutePath().toString());
         FileNameSpace fns = (FileNameSpace) lookup.remote;
-        fns.move(lookup.remainingPath, target.toAbsolutePath().toString(), options);
+        fns.move(lookup.remainingPath, target.normalize().toAbsolutePath().toString(), options);
     }
 
     @Override

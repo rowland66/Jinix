@@ -15,6 +15,8 @@ import java.util.EnumSet;
  */
 public interface NameSpace extends java.rmi.Remote {
 
+    static final String SERVER_LOGGER = "jinix.ns";
+
     enum BindTranslatorOption {
         ACTIVATE,
         PASSIVE,

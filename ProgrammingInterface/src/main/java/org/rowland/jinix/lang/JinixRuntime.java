@@ -114,8 +114,18 @@ public abstract class JinixRuntime {
      */
     public abstract boolean isForkChild();
 
+    /**
+     * Get the process identifier of the current process.
+     *
+     * @return the process ID
+     */
     public abstract int getPid();
 
+    /**
+     * Block the thread that calls this method until a child process terminates.
+     * If not child process
+     * @return
+     */
     public abstract int waitForChild();
 
     public abstract JinixPipe pipe();
@@ -125,6 +135,8 @@ public abstract class JinixRuntime {
     public abstract void registerSignalHandler(ProcessSignalHandler handler);
 
     public abstract JinixFileDescriptor getTranslatorFile();
+
+    public abstract String getTranslatorNodePath();
 
     public abstract void bindTranslator(Remote translator);
 

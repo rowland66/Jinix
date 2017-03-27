@@ -17,6 +17,7 @@ import java.rmi.registry.Registry;
 import java.rmi.server.RMISocketFactory;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.logging.Handler;
+import java.util.logging.Level;
 import java.util.logging.LogManager;
 import java.util.logging.Logger;
 
@@ -60,6 +61,8 @@ public class JinixKernel {
             FileNameSpace rootFileSystem = getRootFileSystem(new String[0]);
 
             fs = new NameSpaceServer(rootFileSystem);
+
+            ((RootFileSystem) rootFileSystem).setRootNameSpace(fs);
 
             registry.rebind("root", fs);
 
@@ -137,6 +140,7 @@ public class JinixKernel {
     private static void setupLogging(String[] args) {
 
         Logger rootLogger = LogManager.getLogManager().getLogger("");
+        rootLogger.setLevel(Level.INFO);
 
         for (int i =0; i<args.length; i++) {
             if (args[i].equals("-i") || args[i].equals("--interactive")) {
@@ -196,7 +200,16 @@ public class JinixKernel {
             Method initMethod = rootFileSystemClass.getMethod("runAsRootFileSystem", args.getClass());
             Object[] invokeArgs = new Object[1];
             invokeArgs[0] = args;
-            return (FileNameSpace) initMethod.invoke(null, invokeArgs);
+            Object rtrn =initMethod.invoke(null, invokeArgs);
+
+            if (!(rtrn instanceof FileNameSpace)) {
+                throw new RuntimeException("The root file system class is invalid: runAsRootFileSystem does not return a FileNameSpace");
+            }
+            if (!(rtrn instanceof RootFileSystem)) {
+                throw new RuntimeException("The root file system class is invalid: runAsRootFileSystem does not return a RootFileSystem");
+            }
+
+            return (FileNameSpace) rtrn;
         } catch (ClassNotFoundException e) {
             throw new RuntimeException("Failed to load the root file system class");
         } catch (NoSuchMethodException e) {

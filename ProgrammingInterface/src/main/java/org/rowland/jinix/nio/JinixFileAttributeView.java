@@ -45,7 +45,7 @@ public class JinixFileAttributeView implements BasicFileAttributeView {
     Path p;
 
     JinixFileAttributeView(Path path) {
-        p = path;
+        p = path.normalize().toAbsolutePath();
     }
 
     @Override
