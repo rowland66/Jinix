@@ -324,6 +324,14 @@ public class File
         }
     }
 
+    public File(String pathname, boolean jinixFile) {
+        this(pathname);
+        this.nativeAccess = !jinixFile;
+        if (!nativeAccess) {
+            this.jinixFile = new JinixFile(pathname);
+        }
+    }
+
     /* Note: The two-argument File constructors do not interpret an empty
        parent abstract pathname as the current user directory.  An empty parent
        instead causes the child to be resolved against the system-dependent
@@ -388,6 +396,13 @@ public class File
         }
     }
 
+    public File(String parent, String child, boolean jinixFile) {
+        this(parent, child);
+        nativeAccess = !jinixFile;
+        if (!nativeAccess) {
+            this.jinixFile = new JinixFile(parent, child);
+        }
+    }
     /**
      * Creates a new <code>File</code> instance from a parent abstract
      * pathname and a child pathname string.
@@ -430,6 +445,8 @@ public class File
             }
         }
 
+        nativeAccess = parent.nativeAccess;
+
         if (parent != null) {
             if (parent.path.equals("")) {
                 this.path = fs.resolve(fs.getDefaultParent(),
@@ -447,6 +464,18 @@ public class File
                 jinixFile = new JinixFile(new JinixFile(parent.getPath()), child);
             } else {
                 jinixFile = new JinixFile((JinixFile) null, child);
+            }
+        }
+    }
+
+    public File(File parent, String child, boolean jinixFile) {
+        this(parent, child);
+        nativeAccess = !jinixFile;
+        if (!nativeAccess) {
+            if (parent != null) {
+                this.jinixFile = new JinixFile(new JinixFile(parent.getPath()), child);
+            } else {
+                this.jinixFile = new JinixFile((JinixFile) null, child);
             }
         }
     }
@@ -527,6 +556,13 @@ public class File
         }
     }
 
+    public File(URI uri, boolean jinixFile) {
+        this(uri);
+        nativeAccess = !jinixFile;
+        if (!nativeAccess) {
+            this.jinixFile = new JinixFile(uri);
+        }
+    }
 
     /* -- Path-component accessors -- */
 
@@ -2040,13 +2076,16 @@ public class File
      * @since  1.6
      */
     public long getFreeSpace() {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null) {
-            sm.checkPermission(new RuntimePermission("getFileSystemAttributes"));
-            sm.checkRead(path);
-        }
-        if (isInvalid()) {
-            return 0L;
+
+        if (nativeAccess) {
+            SecurityManager sm = System.getSecurityManager();
+            if (sm != null) {
+                sm.checkPermission(new RuntimePermission("getFileSystemAttributes"));
+                sm.checkRead(path);
+            }
+            if (isInvalid()) {
+                return 0L;
+            }
         }
         return Long.MAX_VALUE;
     }

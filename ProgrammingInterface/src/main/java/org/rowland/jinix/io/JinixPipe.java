@@ -8,6 +8,8 @@ import org.rowland.jinix.fifo.FileChannelPair;
  */
 public class JinixPipe {
     private FileChannelPair pair;
+
+
     public JinixPipe(FileChannelPair pair) {
         this.pair = pair;
     }

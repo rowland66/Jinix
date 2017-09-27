@@ -201,7 +201,7 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
 
         synchronized (p) {
             if (p.children.isEmpty()) {
-                throw new IllegalStateException("Process Manager: Call to waitForChild() with no child processes: "+pid);
+                return -1;
             }
 
             for (Proc child : p.children) {

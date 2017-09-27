@@ -55,7 +55,6 @@ public class ExecClassLoader extends URLClassLoader {
     String getMainClassName() throws IOException {
         URL u = new URL("jar", "", jarURL + "!/");
         JarURLConnection uc = (JarURLConnection)u.openConnection();
-        uc.setUseCaches(true);
         Attributes attr = uc.getMainAttributes();
         return attr != null ? attr.getValue(Attributes.Name.MAIN_CLASS) : null;
     }
@@ -70,7 +69,6 @@ public class ExecClassLoader extends URLClassLoader {
     String[] getLibraryNames() throws IOException {
         URL u = new URL("jar", "", jarURL + "!/");
         JarURLConnection uc = (JarURLConnection)u.openConnection();
-        uc.setUseCaches(true);
         Attributes attr = uc.getMainAttributes();
         String classPath = attr.getValue(Attributes.Name.CLASS_PATH);
         if (classPath == null) {

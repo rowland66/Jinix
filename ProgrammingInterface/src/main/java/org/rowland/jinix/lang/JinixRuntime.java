@@ -62,6 +62,7 @@ public abstract class JinixRuntime {
 
     /**
      * Get the Jinix systems root NameSpace wrapped in javax.naming.Context interface.
+     *
      * @return
      */
     public abstract Context getNamingContext();
@@ -108,7 +109,8 @@ public abstract class JinixRuntime {
     public abstract int fork() throws FileNotFoundException, InvalidExecutableException;
 
     /**
-     * Was the current process started as a fork of a parent process.
+     * Was the current process started as a fork of a parent process. This method will only
+     * return true once for any process. Once it is called, any subsequent calls return false.
      *
      * @return true if the current process is a fork of a parent process
      */
@@ -123,13 +125,25 @@ public abstract class JinixRuntime {
 
     /**
      * Block the thread that calls this method until a child process terminates.
-     * If not child process
-     * @return
+     * If no child process exists, returns -1.
+     *
+     * @return the pid of the child process that terminated, or -1 if not child processes exist
      */
     public abstract int waitForChild();
 
+    /**
+     * Create a JinixPipe that can be used to transfer data between two processes.
+     *
+     * @return a new JinixPipe
+     */
     public abstract JinixPipe pipe();
 
+    /**
+     * Send a ProcessManager.Signal to another process.
+     *
+     * @param pid
+     * @param signal
+     */
     public abstract void sendSignal(int pid, ProcessManager.Signal signal);
 
     public abstract void registerSignalHandler(ProcessSignalHandler handler);

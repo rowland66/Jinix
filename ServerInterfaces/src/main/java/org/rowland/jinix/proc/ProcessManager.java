@@ -13,7 +13,10 @@ public interface ProcessManager extends Remote {
 
     public enum EventName {CHILD, DEREGISTER};
 
-    public enum Signal {SHUTDOWN, ABORT, HANGUP, KILL, TERMINATE, CHILD};
+    public enum Signal {SHUTDOWN, // Shutdown the Jinix Kernel
+        ABORT, // Sent by the ExecLauncher to itself to signal that the launched process has exited
+        HANGUP, //
+        KILL, TERMINATE, CHILD};
 
     int registerProcess(int parentId, String cmd, String[] args) throws RemoteException;
 

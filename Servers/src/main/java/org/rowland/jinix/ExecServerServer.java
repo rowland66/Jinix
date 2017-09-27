@@ -10,11 +10,14 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.JarURLConnection;
+import java.net.URL;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardOpenOption;
 import java.rmi.RemoteException;
 import java.util.*;
+import java.util.jar.Attributes;
 import java.util.logging.Logger;
 
 import static org.rowland.jinix.JinixKernel.consoleLogging;
@@ -298,7 +301,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
         return rtrn;
     }
 
-    private boolean isValidExecutable(FileChannel cmd, StringBuilder redirectExecutable) {
+    private static boolean isValidExecutable(FileChannel cmd, StringBuilder redirectExecutable) {
         try {
             byte[] magicBytes = cmd.read(2);
             if (magicBytes == null || magicBytes.length < 2) {

@@ -528,6 +528,7 @@ public class ExecLauncher {
         public boolean isForkChild() {
             if (System.getProperty(JINIX_FORK) != null &&
                     Integer.parseInt(System.getProperty(JINIX_FORK)) != pid) {
+                JinixSystem.setJinixProperty(JINIX_FORK, Integer.toString(pid));
                 return true;
             } else {
                 return false;
