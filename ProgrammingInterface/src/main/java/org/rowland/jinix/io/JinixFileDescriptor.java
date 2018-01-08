@@ -1,9 +1,9 @@
 package org.rowland.jinix.io;
 
-import org.rowland.jinix.naming.FileChannel;
-import org.rowland.jinix.naming.FileNameSpace;
+import org.rowland.jinix.naming.RemoteFileAccessor;
 
 import java.io.Closeable;
+import java.io.FileDescriptor;
 import java.io.IOException;
 import java.rmi.NoSuchObjectException;
 import java.rmi.RemoteException;
@@ -13,16 +13,18 @@ import java.util.List;
 /**
  * Created by rsmith on 12/20/2016.
  */
-public class JinixFileDescriptor {
+public class JinixFileDescriptor extends FileDescriptor {
 
     public static List<JinixFileDescriptor> openFileDescriptors = new ArrayList<JinixFileDescriptor>();
 
-    FileChannel handle;
+    public static Object blockedTerminalOperationSynchronizationObject = new Object();
+
+    RemoteFileAccessor handle;
     private Closeable parent;
     private List<Closeable> otherParents;
     private boolean closed;
 
-    public JinixFileDescriptor(FileChannel streamHandle) {
+    public JinixFileDescriptor(RemoteFileAccessor streamHandle) {
         handle = streamHandle;
         if (handle != null) { // Translators on directories create file descriptors with null handles. These are never used.
             synchronized (openFileDescriptors) {
@@ -31,7 +33,7 @@ public class JinixFileDescriptor {
         }
     }
 
-    public FileChannel getHandle() {
+    public RemoteFileAccessor getHandle() {
         return handle;
     }
 

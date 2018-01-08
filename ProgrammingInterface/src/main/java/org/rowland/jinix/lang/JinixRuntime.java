@@ -1,5 +1,6 @@
 package org.rowland.jinix.lang;
 
+import org.rowland.jinix.IllegalOperationException;
 import org.rowland.jinix.exec.InvalidExecutableException;
 import org.rowland.jinix.fifo.FileChannelPair;
 import org.rowland.jinix.io.JinixFileDescriptor;
@@ -75,7 +76,7 @@ public abstract class JinixRuntime {
      *            images.
      * @param args the arguments to provide to the executable images as a parameter to the
      *             main() method.
-     * @return the Jinix process ID of the new process.
+     * @return the process ID of the new process that is executing the command
      * @throws FileNotFoundException if the Jinix executable image cannot be located
      */
     public abstract int exec(String cmd, String[] args)
@@ -86,16 +87,21 @@ public abstract class JinixRuntime {
      * input, output and error file descriptors.
      *
      * @param env
-     * @param cmd
-     * @param args
+     * @param cmd the name of the Jinix executable to execute. The JINIX_PATH will be searched
+     *            and the JINIX_PATH_EXT executable suffix's will be applied locate executable
+     *            images.
+     * @param args the arguments to provide to the executable images as a parameter to the
+     *             main() method.
+     * @param processGroupId -1 to set the processGroupId to the pid of the new process (ie. create a new process group),
+     *                       0 to join the processGroup of the parent, any other value will be assigned directly as the processGroupId
      * @param stdin
      * @param stdout
      * @param stderr
-     * @return
+     * @return the process ID of the new process that is executing the command
      * @throws FileNotFoundException
      * @throws InvalidExecutableException
      */
-    public abstract int exec(Properties env, String cmd, String[] args,
+    public abstract int exec(Properties env, String cmd, String[] args, int processGroupId,
                              JinixFileDescriptor stdin, JinixFileDescriptor stdout, JinixFileDescriptor stderr)
             throws FileNotFoundException, InvalidExecutableException;
 
@@ -124,12 +130,29 @@ public abstract class JinixRuntime {
     public abstract int getPid();
 
     /**
-     * Block the thread that calls this method until a child process terminates.
+     * Get the process group identifier of the current process. If the process group id equals the pid, the process is
+     * a process group leader.
+     *
+     * @return the Process Group ID
+     */
+    public abstract int getProcessGroupId();
+
+    /**
+     * Get the session identifier of the current process. If the session id equals the pid, the process is a session
+     * leader.
+     *
+     * @return the Session ID
+     */
+    public abstract int getProcessSessionId();
+
+    /**
+     * Block the thread that calls this method until a child process is stopped or terminates.
      * If no child process exists, returns -1.
      *
-     * @return the pid of the child process that terminated, or -1 if not child processes exist
+     * @param nowait true if call should check for and return a pending ChildEvents, but not wait
+     * @return the pid of the child process that triggered the return, or -1 if no child processes exist
      */
-    public abstract int waitForChild();
+    public abstract ProcessManager.ChildEvent waitForChild(boolean nowait);
 
     /**
      * Create a JinixPipe that can be used to transfer data between two processes.
@@ -146,6 +169,19 @@ public abstract class JinixRuntime {
      */
     public abstract void sendSignal(int pid, ProcessManager.Signal signal);
 
+    /**
+     * Send a ProcessManager.Signal to all of the processes in a process group.
+     *
+     * @param processGroupId
+     * @param signal
+     */
+    public abstract void sendSignalProcessGroup(int processGroupId, ProcessManager.Signal signal);
+
+    /**
+     * Register a signal handler to receive Jinix signals.
+     *
+     * @param handler
+     */
     public abstract void registerSignalHandler(ProcessSignalHandler handler);
 
     public abstract JinixFileDescriptor getTranslatorFile();
@@ -154,5 +190,42 @@ public abstract class JinixRuntime {
 
     public abstract void bindTranslator(Remote translator);
 
+    /**
+     * Register a Java native thread with the Jinix runtime. Only called internally, and calling with any thread
+     * created in a Jinix program will be a NOOP since the thread is already registered.
+     */
+    public abstract void registerJinixThread(Thread t);
 
+    /**
+     * Set the process group ID for a Jinix process. The process group ID can only be set to ID of a process group in
+     * the same session as the current process. -1 can be used to create a new process group with the current process as
+     * the only member. A process group leader cannot join a new process group.
+     *
+     * @param processGroupId -1 to create a new process group with the ID of the current process's PID or any other valid
+     *                       process group ID.
+     */
+    public abstract void setProcessGroupId(int processGroupId);
+
+    /**
+     * Create a new session if the calling process is not a process group leader.  The calling process is the leader
+     * of the new session (i.e., its session ID is made the same as its process ID).The calling process also becomes
+     * the process group leader of a new process group in the session (i.e., its process group ID is made the
+     * same as its process ID).
+     *
+     * The calling process will be the only process in the new process group and in the new session.
+     *
+     * @throws IllegalOperationException
+     */
+    public abstract void setProcessSessionId();
+
+    /**
+     * Set the terminal ID for a Jinix process. Once the id is set to a value other than -1, it cannot be changed to any
+     * value other than -1. When a deamon disassociated itself from a terminal, it can set its terminal ID to -1.
+     *
+     * @param terminalId -1 to disassociate the process from a terminal, any other value to associate the process with a terminal
+     */
+    public abstract void setProcessTerminalId(short terminalId);
+
+
+    public abstract void setForegroundProcessGroupId(int processGroupId);
 }

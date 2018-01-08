@@ -10,7 +10,6 @@ import java.nio.file.*;
 import java.rmi.Remote;
 import java.rmi.RemoteException;
 import java.util.*;
-import java.util.logging.LogManager;
 import java.util.logging.Logger;
 
 /**
@@ -27,10 +26,12 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
     private final Properties translatorConfig = new Properties();
     private final Map<String, Object> namingOverlay;
     private FileNameSpace rootFileSystem;
+    private List<FileNameSpace> subFileNameSpaceList = new LinkedList<FileNameSpace>();
 
     NameSpaceServer(FileNameSpace rootFileSystem) throws RemoteException {
         super();
         this.rootFileSystem = rootFileSystem;
+        subFileNameSpaceList.add(rootFileSystem);
 
         namingOverlay = new HashMap<String, Object>();
         try {
@@ -237,6 +238,18 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
         return rtrn;
     }
 
+    @Override
+    public List<FileAccessorStatistics> getOpenFiles(int pid) throws RemoteException {
+        List<FileAccessorStatistics> rtrnList = new ArrayList<FileAccessorStatistics>(64);
+        for (FileNameSpace ns : subFileNameSpaceList) {
+            List<FileAccessorStatistics> nsList = ns.getOpenFiles(pid);
+            if (nsList != null) {
+                rtrnList.addAll(nsList);
+            }
+        }
+        return rtrnList;
+    }
+
     private static String translatorDefString(String cmd, String[] args) {
         StringBuilder sb = new StringBuilder();
         sb.append(cmd);
@@ -341,9 +354,9 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
             throw new RemoteException("Illegal attempt to start a translator on a filesystem node that does not exist: "+td.node);
         }
 
-        FileChannel fc = null;
+        RemoteFileAccessor fc = null;
         if (rootFileSystem.getFileAttributes(td.node).type == DirectoryFileData.FileType.FILE) {
-            fc = rootFileSystem.getFileChannel(td.node, StandardOpenOption.READ, StandardOpenOption.WRITE);
+            fc = rootFileSystem.getRemoteFileAccessor(-1, td.node, EnumSet.of(StandardOpenOption.READ, StandardOpenOption.WRITE));
         }
 
         try {
@@ -351,6 +364,8 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
         } catch (FileNotFoundException | InvalidExecutableException | RemoteException e) {
             throw e;
         }
+
+        //TODO: Create a way to pass the pid of the new process to the filesystem to associate the open file with the pid.
 
         synchronized (td) {
             if (td.remote == null) {
@@ -360,6 +375,11 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
                     throw e;
                 }
             }
+        }
+
+        // If the translator is a FileNameSpace, add it to the list of sub namespaces.
+        if (td.remote instanceof FileNameSpace) {
+            subFileNameSpaceList.add((FileNameSpace) td.remote);
         }
 
         logger.info("Successfully started translator "+td.command + " at: "+td.node);

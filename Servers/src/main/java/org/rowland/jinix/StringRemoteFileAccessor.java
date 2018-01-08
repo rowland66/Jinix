@@ -1,6 +1,6 @@
 package org.rowland.jinix;
 
-import org.rowland.jinix.naming.FileChannel;
+import org.rowland.jinix.naming.RemoteFileAccessor;
 
 import java.io.*;
 import java.rmi.RemoteException;
@@ -8,19 +8,22 @@ import java.rmi.RemoteException;
 /**
  * A simple FileIS that serves up a String from memory.
  */
-public class StringFileChannel extends JinixKernelUnicastRemoteObject implements FileChannel {
+public class StringRemoteFileAccessor extends JinixKernelUnicastRemoteObject implements RemoteFileAccessor {
     private ByteArrayInputStream data;
     private int openCount;
+    private int size;
 
 
-    public StringFileChannel(String fileData) throws RemoteException {
+    public StringRemoteFileAccessor(String fileData) throws RemoteException {
         super();
         openCount = 1;
-        data = new ByteArrayInputStream(fileData.getBytes());
+        byte[] stringBytes = fileData.getBytes();
+        size = stringBytes.length;
+        data = new ByteArrayInputStream(stringBytes);
     }
 
     @Override
-    public byte[] read(int len) throws RemoteException {
+    public byte[] read(int processGroupId, int len) throws RemoteException {
         if (data==null) {
             throw new RemoteException("File closed");
         }
@@ -34,13 +37,16 @@ public class StringFileChannel extends JinixKernelUnicastRemoteObject implements
     }
 
     @Override
-    public int write(byte[] b) throws RemoteException {
+    public int write(int processGroupId, byte[] b) throws RemoteException {
         return b.length;
     }
 
     @Override
     public long skip(long n) throws RemoteException {
-        return 0;
+        if (data==null) {
+            throw new RemoteException("File closed");
+        }
+        return data.skip(n);
     }
 
     @Override
@@ -53,22 +59,23 @@ public class StringFileChannel extends JinixKernelUnicastRemoteObject implements
 
     @Override
     public long getFilePointer() throws RemoteException {
-        return 0;
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public void seek(long pos) throws RemoteException {
+        throw new UnsupportedOperationException();
 
     }
 
     @Override
     public long length() throws RemoteException {
-        return 0;
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public void setLength(long length) throws RemoteException {
-
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -85,5 +92,10 @@ public class StringFileChannel extends JinixKernelUnicastRemoteObject implements
     @Override
     public void duplicate() throws RemoteException {
         openCount++;
+    }
+
+    @Override
+    public void force(boolean metadata) throws RemoteException {
+        throw new UnsupportedOperationException();
     }
 }

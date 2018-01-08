@@ -1,15 +1,11 @@
 package org.rowland.jinix;
 
 import org.rowland.jinix.naming.*;
-import org.rowland.jinix.proc.DeregisterEventData;
-import org.rowland.jinix.proc.EventNotificationHandler;
-import org.rowland.jinix.proc.ProcessManager;
+import org.rowland.jinix.proc.*;
 
-import java.io.FileNotFoundException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.*;
-import java.rmi.Remote;
 import java.rmi.RemoteException;
 import java.util.*;
 import java.util.concurrent.Semaphore;
@@ -24,19 +20,25 @@ import java.util.logging.Logger;
  */
 class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements ProcessManager, FileNameSpace {
 
-    static Logger logger = Logger.getLogger(SERVER_LOGGER);
+    static final Logger logger = Logger.getLogger(SERVER_LOGGER);
 
     private State state;
     private NameSpace ns;
-    private ProcessManager p;
     private AtomicInteger nextId = new AtomicInteger(1); // Ever increasing counter for the next process id
 
-    Map<Integer, Proc> processMap; // Map from process id to Proc objects maintaned for each running process
+    Map<Integer, Proc> processMap; // Map from process id to Proc objects maintained for each running process
+    Map<Integer, List<Proc>> processGroupMap; // Map from process group id to a list of Proc objects belonging to the process group
+
+    Map<EventName, List<EventNotificationHandler>> globalEventHandlers; // Handlers for global events (DEREGISTER and RESUME)
+
     long startUpTime;
 
-    ProcessManagerServer() throws RemoteException {
+    ProcessManagerServer(NameSpace rootNameSpace) throws RemoteException {
         super();
-        processMap = new HashMap<Integer, Proc>();
+        ns = rootNameSpace;
+        processMap = new HashMap<>();
+        processGroupMap = new HashMap<>();
+        globalEventHandlers = new HashMap<>();
         startUpTime = System.currentTimeMillis();
         state = State.RUNNING;
     }
@@ -46,47 +48,82 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
      *
      * @param parentId process id of the processes parent. Translators have parentId -1, session
      *                 group leaders and daemons have parent id 0
+     * @param processGroupId
      * @param cmd
      * @param args
      * @return
      * @throws RemoteException
      */
     @Override
-    public int registerProcess(int parentId, String cmd, String[] args)
+    public RegisterResult registerProcess(int parentId, int processGroupId, String cmd, String[] args)
             throws RemoteException {
 
         if (state == State.STOPPING || state == State.SHUTDOWN) {
 
         }
+
+        Proc parentProc = null;
+        if (parentId > 0) {
+            parentProc = processMap.get(parentId);
+            if (parentProc == null) {
+                throw new RemoteException("Invalid parent pid: " + parentId);
+            }
+
+            if (processGroupId == 0) {
+                processGroupId = parentProc.processGroup;
+            }
+        }
+
+        if (processGroupId == 0) {
+            throw new RemoteException("Invalid call processGroupId = 0 and parentId = 0");
+        }
+
         Proc p = new Proc();
-        p.id = nextId.incrementAndGet();
+        p.id = nextId.getAndIncrement();
         p.parentId = parentId;
+        p.processGroup = (processGroupId == -1 ? p.id : processGroupId);
+        p.terminal = (parentProc != null ? parentProc.terminal : -1);
+        p.sessionId = (parentProc != null ? parentProc.sessionId : p.id);
+        p.state = ProcessState.STARTING;
         p.cmd = cmd;
         p.args = args;
         p.startTime = System.currentTimeMillis();
         p.isZombie = false;
 
         // Processes with parentId == 0 are group leaders and have no parent.
-        if (parentId > 0) {
-            Proc parent = processMap.get(parentId);
+        if (parentProc != null) {
 
-            synchronized (parent.children) {
-                parent.children.add(p);
+            synchronized (parentProc.children) {
+                parentProc.children.add(p);
             }
         }
 
         p.children = new LinkedList<Proc>();
 
-        p.eventWaiters = new HashMap<EventName, Object>(16);
-        p.eventHandlers = new HashMap<EventName, List<EventNotificationHandler>>(16);
+        p.eventWaiters = new HashMap<>(16);
+        p.eventHandlers = new HashMap<>(16);
 
-        p.pendingSignals = new LinkedList<Signal>();
+        p.pendingSignals = new LinkedList<>();
 
         synchronized (processMap) {
             processMap.put(Integer.valueOf(p.id), p);
+            if (p.id == p.processGroup) {
+                List<Proc> processGroupList = new LinkedList<>();
+                processGroupList.add(p);
+                processGroupMap.put(p.processGroup, processGroupList);
+            } else {
+                List<Proc> processGroupList = processGroupMap.get(p.processGroup);
+                synchronized (processGroupList) {
+                    processGroupList.add(p);
+                }
+            }
         }
 
-        return p.id;
+        RegisterResult rtrn = new RegisterResult();
+        rtrn.pid = p.id;
+        rtrn.pgid = p.processGroup;
+
+        return rtrn;
     }
 
     /**
@@ -97,6 +134,8 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
      * to receive them.
      *
      * @param id
+     * @return boolean indicating if the process existed and was deregistered. A possible condition could exist where
+     * two thread try to de
      */
     public synchronized void deRegisterProcess(int id) {
         Proc p = processMap.get(id);
@@ -105,55 +144,38 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
             throw new IllegalArgumentException("Call to deRegisterProcess with unknown pid: "+id);
         }
 
-        // A process has called waitForChild() and one of its children is a zombie. Cleanup the processMap and return.
-        if (p.isZombie) {
-            synchronized (processMap) {
-                processMap.remove(id);
-                Proc parent = processMap.get(p.parentId);
-                parent.children.remove(p);
-                return;
-            }
-        }
+        EventData data = new EventData();
+        data.pid = p.id;
+        data.sessionId = p.sessionId;
+        data.terminalId = p.terminal;
+        triggerProcessEvent(p, EventName.DEREGISTER, data);
+        triggerGlobalEvent(EventName.DEREGISTER, data);
 
-        if (p.eventHandlers.containsKey(EventName.DEREGISTER)) {
-            List<EventNotificationHandler> handlerList = p.eventHandlers.get(EventName.DEREGISTER);
-            for (EventNotificationHandler handler : handlerList) {
-                DeregisterEventData data = new DeregisterEventData();
-                data.pid = p.id;
-                try {
-                    handler.handleEventNotification(EventName.DEREGISTER, data);
-                } catch (RemoteException e) {
-                    throw new RuntimeException("Process Manager: Failure delivering DEREGISTER event notification for " + p.id, e);
-                }
-            }
+        // If a thread in the terminating process is listening for signals, notify it so that it won't hang the kernel on shutdown
+        synchronized(p.pendingSignals) {
+            p.pendingSignals.notifyAll();
         }
 
         if (p.parentId <= 0) {
             synchronized (processMap) {
+                List<Proc> processGroupList = processGroupMap.get(p.processGroup);
+                synchronized (processGroupList) {
+                    processGroupList.remove(p);
+                    if (processGroupList.isEmpty()) {
+                        processGroupMap.remove(p.processGroup);
+                    }
+                }
                 processMap.remove(id);
                 return;
             }
         }
 
+        p.state = ProcessState.SHUTDOWN;
+        p.isZombie = true;
+
         Proc parent = processMap.get(p.parentId);
-        ChildWaitObject childWaitObject;
-        synchronized (parent.eventWaiters) {
-            childWaitObject = (ChildWaitObject) parent.eventWaiters.get(EventName.CHILD);
-            if (childWaitObject == null) {
-                childWaitObject = new ChildWaitObject();
-                parent.eventWaiters.put(EventName.CHILD, childWaitObject);
-            }
-        }
 
-        synchronized (childWaitObject) {
-            if (childWaitObject.waiterCount == 0) {
-                p.isZombie = true;
-                sendSignal(p.parentId, Signal.CHILD);
-                return;
-            }
-
-            childWaitObject.notifyAll();
-        }
+        enqueueParentEventWaiters(p);
 
         // Any children of the process being deregistered get their parentId set to 0. They are daemons.
         if (!p.children.isEmpty()) {
@@ -163,11 +185,85 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
         }
 
         synchronized (processMap) {
+            List<Proc> processGroupList = processGroupMap.get(p.processGroup);
+            synchronized (processGroupList) {
+                processGroupList.remove(p);
+                if (processGroupList.isEmpty()) {
+                    processGroupMap.remove(p.processGroup);
+                }
+            }
             processMap.remove(id);
             parent.children.remove(p);
         }
     }
 
+    @Override
+    public void updateProcessState(int id, ProcessState state) throws RemoteException {
+
+        if (state == null) {
+            throw new IllegalArgumentException("Call updateProcessState() with null state");
+        }
+
+        Proc p = processMap.get(id);
+
+        if (p == null) {
+            throw new IllegalArgumentException("Call to updateProcessState() with unknown pid: "+id);
+        }
+
+        ProcessState oldState = p.state;
+        p.state = state;
+
+        if (oldState == ProcessState.RUNNING && p.state == ProcessState.SUSPENDED) {
+            enqueueParentEventWaiters(p);
+        }
+
+        if (oldState == ProcessState.SUSPENDED && p.state == ProcessState.RUNNING) {
+            EventData eventData = new EventData();
+            eventData.pid = p.id;
+            eventData.pgid = p.processGroup;
+            eventData.sessionId = p.sessionId;
+            eventData.terminalId = p.terminal;
+            triggerGlobalEvent(EventName.RESUME, eventData);
+        }
+
+        // The SHUTDOWN state is handled by deRegisterProcess.
+    }
+
+    private void enqueueParentEventWaiters(Proc p) {
+
+        Proc parent = processMap.get(p.parentId);
+
+        // If we have no parent, then our parent cannot be waiting for an event.
+        if (parent == null) {
+            return;
+        }
+
+        ChildWaitObject childWaitObject = null;
+        synchronized (parent.eventWaiters) {
+            childWaitObject = parent.eventWaiters.get(EventName.CHILD);
+            if ( childWaitObject != null){
+                for (Proc listObject : childWaitObject.processList) {
+                    if (listObject.id == p.id) {
+                        return;
+                    }
+                }
+            } else {
+                childWaitObject = new ChildWaitObject();
+                parent.eventWaiters.put(EventName.CHILD, childWaitObject);
+            }
+            childWaitObject.processList.add(p);
+        }
+
+        synchronized (childWaitObject) {
+            if (childWaitObject.waiterCount == 0) {
+                sendSignal(p.parentId, Signal.CHILD);
+                return;
+            }
+
+            childWaitObject.notifyAll();
+        }
+
+    }
     /**
      * Return an array of the process IDs for all processes registered with the ProcessManager. IDs of Active and zombie
      * processes will be included in the array.
@@ -176,12 +272,21 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
      * @throws RemoteException
      */
     @Override
-    public int[] listProcessIDs() throws RemoteException {
-        int[] rtrn = new int[processMap.size()];
+    public ProcessData[] getProcessData() throws RemoteException {
+        ProcessData[] rtrn = new ProcessData[processMap.size()];
         int cnt = 0;
-        Iterator<Map.Entry<Integer,Proc>> i = processMap.entrySet().iterator();
-        while (i.hasNext()) {
-            rtrn[cnt++] = i.next().getValue().id;
+        for (Proc proc : processMap.values()) {
+            ProcessData pd = new ProcessData();
+            pd.id =  proc.id;
+            pd.parentId = (proc.parentId);
+            pd.processGroupId = proc.processGroup;
+            pd.sessionId = proc.sessionId;
+            pd.terminalId = proc.terminal;
+            pd.startTime = proc.startTime;
+            pd.state = proc.state;
+            pd.cmd = proc.cmd;
+            pd.args = proc.args;
+            rtrn[cnt++] = pd;
         }
         return rtrn;
     }
@@ -189,48 +294,45 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
     /**
      * Wait for a child process of the pid to terminate.
      *
-     * @param pid
+     * @param pid process Id of the parent process.
      * @return
      * @throws RemoteException
      */
     @Override
-    public int waitForChild(int pid) throws RemoteException {
+    public ChildEvent waitForChild(int pid, boolean nowait) throws RemoteException {
         Proc p = processMap.get(pid);
 
         if (p == null) throw new IllegalArgumentException("ProcessManager: Unknown pid: "+pid);
 
-        synchronized (p) {
-            if (p.children.isEmpty()) {
-                return -1;
+        synchronized (p.eventWaiters) {
+            if (p.eventWaiters.get(EventName.CHILD) == null) {
+                p.eventWaiters.put(EventName.CHILD, new ChildWaitObject());
             }
+        }
 
-            for (Proc child : p.children) {
-                if (child.isZombie) {
-                    deRegisterProcess(child.id);
-                    return child.id;
-                }
-                break;
-            }
-
-            ChildWaitObject childWaitObject = (ChildWaitObject) p.eventWaiters.get(EventName.CHILD);
-            if (childWaitObject == null) {
-                childWaitObject = new ChildWaitObject();
-                p.eventWaiters.put(EventName.CHILD, childWaitObject);
-            }
-
+        ChildWaitObject childWaitObject = p.eventWaiters.get(EventName.CHILD);
+        while(true) {
             synchronized (childWaitObject) {
-                try {
+                if (childWaitObject.processList.isEmpty()) {
+                    if (nowait) return null;
                     childWaitObject.waiterCount++;
-                    childWaitObject.wait();
-                } catch (InterruptedException e) {
-                    throw new RemoteException("Aborted wait for child process(es) to complete.");
+                    try {
+                        childWaitObject.wait();
+                    } catch (InterruptedException e) {
+                        // Not sure that this can happen, but just in case it does.
+                        return null;
+                    } finally {
+                        childWaitObject.waiterCount--;
+                    }
                 }
-
-                int rtrnVal = childWaitObject.pid;
-                childWaitObject.pid = 0;
-                childWaitObject.waiterCount--;
-
-                return rtrnVal;
+                if (!childWaitObject.processList.isEmpty()) {
+                    Proc childProcess = childWaitObject.processList.removeFirst();
+                    return new ChildEventImpl(childProcess.id, childProcess.processGroup, childProcess.state);
+                }
+                // We may get notified when the process has been terminated.
+                if (p.state == ProcessState.SHUTDOWN) {
+                    return null;
+                }
             }
         }
     }
@@ -244,9 +346,13 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
      * @throws RemoteException
      */
     @Override
-    public void registerEventNotificationHandler(int pid, EventName eventName, EventNotificationHandler handler) throws RemoteException {
+    public void registerEventNotificationHandler(int pid, EventName eventName, EventNotificationHandler handler) {
 
         Proc p = processMap.get(pid);
+
+        if (p == null) {
+            return;
+        }
 
         if (p.isZombie) return;
 
@@ -256,6 +362,43 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
             LinkedList<EventNotificationHandler> l = new LinkedList<EventNotificationHandler>();
             l.add(handler);
             p.eventHandlers.put(eventName, l);
+        }
+    }
+
+    @Override
+    public void registerGlobalEventNotificationHandler(EventName eventName, EventNotificationHandler handler) {
+        if (globalEventHandlers.containsKey(eventName)) {
+            globalEventHandlers.get(eventName).add(handler);
+        } else {
+            LinkedList<EventNotificationHandler> l = new LinkedList<EventNotificationHandler>();
+            l.add(handler);
+            globalEventHandlers.put(eventName, l);
+        }
+    }
+
+    private void triggerProcessEvent(Proc p, EventName eventName, Object data) {
+        if (p.eventHandlers.containsKey(eventName)) {
+            List<EventNotificationHandler> handlerList = p.eventHandlers.get(eventName);
+            for (EventNotificationHandler handler : handlerList) {
+                try {
+                    handler.handleEventNotification(eventName, data);
+                } catch (RemoteException e) {
+                    throw new RuntimeException("ProcessData Manager: Failure delivering " + eventName + " event notification for " + p.id, e);
+                }
+            }
+        }
+    }
+
+    private void triggerGlobalEvent(EventName eventName, Object data) {
+        if (globalEventHandlers.containsKey(eventName)) {
+            List<EventNotificationHandler> handlerList = globalEventHandlers.get(eventName);
+            for (EventNotificationHandler handler : handlerList) {
+                try {
+                    handler.handleEventNotification(eventName, data);
+                } catch (RemoteException e) {
+                    throw new RuntimeException("ProcessData Manager: Failure delivering " + eventName + " global event notification", e);
+                }
+            }
         }
     }
 
@@ -280,13 +423,34 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
     }
 
     @Override
+    public void sendSignalProcessGroup(int processGroupId, Signal signal) {
+
+        List<Proc> processGroupList = processGroupMap.get(processGroupId);
+
+        if (processGroupList == null) {
+            return;
+        }
+
+        synchronized (processGroupList) {
+
+            for (Proc p : processGroupList) {
+                if (p.state != ProcessState.SHUTDOWN || p.state != ProcessState.STOPPING) {
+                    synchronized (p.pendingSignals) {
+                        p.pendingSignals.addLast(signal);
+                        p.pendingSignals.notify();
+                    }
+                }
+            }
+        }
+    }
+
+    @Override
     public Signal listenForSignal(int pid) throws RemoteException {
         Proc p = processMap.get(pid);
 
-        if (p == null) {
-            return null;
-        }
+        if (p == null) throw new IllegalArgumentException("ProcessManager: Unknown pid: "+pid);
 
+        logger.fine("listen for signal: " + pid);
         synchronized (p.pendingSignals) {
             while (p.pendingSignals.isEmpty()) {
                 try {
@@ -295,9 +459,141 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
                     return null;
                 }
             }
-            return p.pendingSignals.removeFirst();
+
+            logger.fine("listen for signal exiting: " + pid);
+
+            if (!p.pendingSignals.isEmpty()) {
+                return p.pendingSignals.removeFirst();
+            } else {
+                return null;
+            }
         }
     }
+
+    @Override
+    public int setProcessGroupId(int pid, int processGroupId) throws IllegalOperationException, RemoteException {
+
+        if (processGroupId < -1) {
+            throw new IllegalArgumentException("processGroupId < -1");
+        }
+
+        Proc p = processMap.get(pid);
+
+        if (p.processGroup == p.id) {
+            throw new IllegalOperationException("Process group leader cannot move to another process group");
+        }
+
+        if (processGroupId > 1) {
+            Proc processGroupLeader = processMap.get(processGroupId);
+            if (processGroupLeader == null || p.sessionId != processGroupLeader.sessionId) {
+                throw new IllegalOperationException("Process cannot be moved to a process group in a different session");
+            }
+        }
+
+        if (processGroupId == -1) {
+            p.processGroup = p.id;
+            return p.processGroup;
+        }
+
+        synchronized (processMap) {
+            List<Proc> processGroupList = processGroupMap.get(p.processGroup);
+            synchronized (processGroupList) {
+                processGroupList.remove(p);
+                if (processGroupList.isEmpty()) {
+                    processGroupMap.remove(p.processGroup);
+                }
+            }
+        }
+
+        p.processGroup = processGroupId;
+
+        synchronized (processMap) {
+            if (p.id == p.processGroup) {
+                List<Proc> processGroupList = new LinkedList<>();
+                processGroupList.add(p);
+                processGroupMap.put(p.processGroup, processGroupList);
+            } else {
+                List<Proc> processGroupList = processGroupMap.get(p.processGroup);
+                synchronized (processGroupList) {
+                    processGroupList.add(p);
+                }
+            }
+        }
+
+        return p.processGroup;
+    }
+
+    @Override
+    public int getProcessSessionId(int pid) {
+
+        Proc p = processMap.get(pid);
+
+        if (p == null) throw new IllegalArgumentException("ProcessManager: Unknown pid: "+pid);
+
+        return p.sessionId;
+    }
+
+    @Override
+    public int setProcessSessionId(int pid) {
+
+        Proc p = processMap.get(pid);
+
+        if (p == null) throw new IllegalArgumentException("ProcessManager: Unknown pid: "+pid);
+
+        if (p.id == p.processGroup) {
+            throw new IllegalOperationException("Session cannot be changed for process group leader");
+        }
+
+        p.sessionId = p.id;
+
+        synchronized (processMap) {
+            List<Proc> processGroupList = processGroupMap.get(p.processGroup);
+            synchronized (processGroupList) {
+                processGroupList.remove(p);
+                if (processGroupList.isEmpty()) {
+                    processGroupMap.remove(p.processGroup);
+                }
+            }
+        }
+
+        p.processGroup = p.id;
+
+        synchronized (processMap) {
+            List<Proc> processGroupList = new LinkedList<>();
+            processGroupList.add(p);
+            processGroupMap.put(p.processGroup, processGroupList);
+        }
+
+        // POSIX says we should do this, but until a process can acquire a terminal it creates a race condition.
+        //p.terminal = -1;
+
+        return p.processGroup;
+    }
+
+    @Override
+    public void setProcessTerminalId(int pid, short terminalId) {
+        Proc p = processMap.get(pid);
+
+        if (p == null) throw new IllegalArgumentException("ProcessManager: Unknown pid: "+pid);
+
+        // Once the terminal ID is set, it cannot be changed to any value other than -1
+        if (p.terminal != -1 && terminalId != -1) {
+            return;
+        }
+
+        p.terminal = terminalId;
+    }
+
+    @Override
+    public short getProcessTerminalId(int pid) throws RemoteException {
+        Proc p = processMap.get(pid);
+
+        if (p == null) throw new IllegalArgumentException("ProcessManager: Unknown pid: "+pid);
+
+        return p.terminal;
+    }
+
+    // Start of FileNameSpace interface implementation
 
     @Override
     public URI getURI() throws RemoteException {
@@ -316,7 +612,6 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
 
         name = name.trim().substring(1);
 
-
         if (name.isEmpty()) {
             DirectoryFileData rtrn = new DirectoryFileData();
             rtrn.lastModified = getStartUpTime();
@@ -326,28 +621,55 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
             return rtrn;
         }
 
-        if (name.indexOf('/') > -1) {
-            throw new NoSuchFileException(name);
-        }
+        ProcFNSParts parts = parseProcFNSParts(name);
 
-        int pid;
-        try {
-            pid = Integer.parseInt(name);
-        } catch (NumberFormatException e) {
-            throw new NoSuchFileException(name);
-        }
-
-        ProcessManagerServer.Proc proc = processMap.get(pid);
+        ProcessManagerServer.Proc proc = processMap.get(parts.pid);
         if (proc == null) {
             throw new NoSuchFileException(name);
         }
 
-        DirectoryFileData rtrn = new DirectoryFileData();
-        rtrn.lastModified = proc.startTime;
-        rtrn.length = 0;
-        rtrn.name=Integer.toString(pid);
-        rtrn.type= DirectoryFileData.FileType.FILE;
-        return rtrn;
+        if (parts.component == null) {
+            DirectoryFileData rtrn = new DirectoryFileData();
+            rtrn.lastModified = proc.startTime;
+            rtrn.name = Integer.toString(parts.pid);
+            rtrn.type = DirectoryFileData.FileType.DIRECTORY;
+            return rtrn;
+        }
+
+        if (parts.component == ComponentEnum.FILES) {
+
+            if (parts.operand == null) {
+                DirectoryFileData rtrn = new DirectoryFileData();
+                rtrn.lastModified = proc.startTime;
+                rtrn.name = "files";
+                rtrn.type = DirectoryFileData.FileType.DIRECTORY;
+                return rtrn;
+            } else {
+                List<FileAccessorStatistics> l = ns.getOpenFiles(parts.pid);
+                for (FileAccessorStatistics fas : l) {
+                    String fileName = fas.getAbsolutePathName();
+                    if (parts.operand.equals(fileName)) {
+                        DirectoryFileData rtrn = new DirectoryFileData();
+                        rtrn.lastModified = proc.startTime;
+                        rtrn.name = fileName;
+                        rtrn.type = DirectoryFileData.FileType.FILE;
+                        return rtrn;
+                    }
+                }
+                throw new NoSuchFileException(name);
+            }
+        } else if (parts.component == ComponentEnum.CMDLINE) {
+            if (parts.operand == null) {
+                DirectoryFileData rtrn = new DirectoryFileData();
+                rtrn.lastModified = proc.startTime;
+                rtrn.name = "cmdline";
+                rtrn.type = DirectoryFileData.FileType.FILE;
+                return rtrn;
+            }
+            throw new NoSuchFileException(name);
+        } else {
+            throw new NoSuchFileException(name);
+        }
     }
 
     @Override
@@ -362,33 +684,124 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
 
     @Override
     public String[] list(String name) throws NotDirectoryException, RemoteException {
-        if (!name.equals("/")) {
+        if (!name.startsWith("/")) {
+            throw new RemoteException("Invalid file name: " + name);
+        }
+
+        name = name.trim().substring(1);
+
+        if (name.isEmpty()) {
+            String[] rtrn = new String[processMap.size()];
+            int i = 0;
+            for (Integer pid : processMap.keySet()) {
+                rtrn[i++] = pid.toString();
+            }
+            return rtrn;
+        }
+
+        ProcFNSParts parts = null;
+        try {
+            parts = parseProcFNSParts(name);
+        } catch (NoSuchFileException e) {
             throw new NotDirectoryException(name);
         }
-        String[] rtrn = new String[processMap.size()];
-        int i=0;
-        for(Integer pid : processMap.keySet()) {
-            rtrn[i++] = pid.toString();
+
+        ProcessManagerServer.Proc proc = processMap.get(parts.pid);
+        if (proc == null) {
+            throw new NotDirectoryException(name);
         }
-        return rtrn;
+
+        if (parts.component == null) {
+            String[] rtrn = new String[]{"cmdline","files"};
+            return rtrn;
+        }
+
+        if (parts.component == ComponentEnum.FILES) {
+
+            if (parts.operand == null) {
+                ArrayList<String> fileList = new ArrayList<String>(64);
+                List<FileAccessorStatistics> l = ns.getOpenFiles(parts.pid);
+                for (FileAccessorStatistics fas : l) {
+                    fileList.add(fas.getAbsolutePathName());
+                }
+                return fileList.toArray(new String[fileList.size()]);
+            } else {
+                throw new NotDirectoryException(name);
+            }
+        }
+
+        throw new NotDirectoryException(name);
     }
 
     @Override
     public DirectoryFileData[] listDirectoryFileData(String name) throws NotDirectoryException, RemoteException {
-        if (!name.equals("/")) {
+        if (!name.startsWith("/")) {
+            throw new RemoteException("Invalid file name: " + name);
+        }
+
+        name = name.trim().substring(1);
+
+        if (name.isEmpty()) {
+            DirectoryFileData[] rtrn = new DirectoryFileData[processMap.size()];
+            int i = 0;
+            for (Integer pid : processMap.keySet()) {
+                DirectoryFileData dfd = new DirectoryFileData();
+                dfd.name = pid.toString();
+                dfd.length = 0;
+                dfd.lastModified = processMap.get(pid).startTime;
+                dfd.type = DirectoryFileData.FileType.DIRECTORY;
+                rtrn[i++] = dfd;
+            }
+            return rtrn;
+        }
+
+        ProcFNSParts parts = null;
+        try {
+            parts = parseProcFNSParts(name);
+        } catch (NoSuchFileException e) {
             throw new NotDirectoryException(name);
         }
-        DirectoryFileData[] rtrn = new DirectoryFileData[processMap.size()];
-        int i=0;
-        for(Integer pid : processMap.keySet()) {
-            DirectoryFileData dfd = new DirectoryFileData();
-            dfd.name = pid.toString();
-            dfd.length = 0;
-            dfd.lastModified = processMap.get(pid).startTime;
-            dfd.type = DirectoryFileData.FileType.DIRECTORY;
-            rtrn[i++] = dfd;
+
+        ProcessManagerServer.Proc proc = processMap.get(parts.pid);
+        if (proc == null) {
+            throw new NotDirectoryException(name);
         }
-        return rtrn;
+
+        if (parts.component == null) {
+            DirectoryFileData cmdline = new DirectoryFileData();
+            cmdline.name = "cmdline";
+            cmdline.length = 0;
+            cmdline.lastModified = 0;
+            cmdline.type = DirectoryFileData.FileType.FILE;
+
+            DirectoryFileData files = new DirectoryFileData();
+            files.name = "files";
+            files.length = 0;
+            files.lastModified = 0;
+            files.type = DirectoryFileData.FileType.DIRECTORY;
+
+            return new DirectoryFileData[]{files};
+        }
+
+        if (parts.component == ComponentEnum.FILES) {
+
+            if (parts.operand == null) {
+                ArrayList<DirectoryFileData> fileList = new ArrayList<DirectoryFileData>(64);
+                List<FileAccessorStatistics> l = ns.getOpenFiles(parts.pid);
+                for (FileAccessorStatistics fas : l) {
+                    DirectoryFileData dfd = new DirectoryFileData();
+                    dfd.name = fas.getAbsolutePathName();
+                    dfd.length = 0;
+                    dfd.lastModified = 0;
+                    dfd.type = DirectoryFileData.FileType.FILE;
+                    fileList.add(dfd);
+                }
+                return fileList.toArray(new DirectoryFileData[fileList.size()]);
+            } else {
+                throw new NotDirectoryException(name);
+            }
+        }
+        throw new NotDirectoryException(name);
     }
 
     @Override
@@ -422,7 +835,7 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
     }
 
     @Override
-    public FileChannel getFileChannel(String name, OpenOption... options) throws FileAlreadyExistsException, NoSuchFileException, RemoteException {
+    public RemoteFileAccessor getRemoteFileAccessor(int pid, String name, Set<? extends OpenOption> options) throws FileAlreadyExistsException, NoSuchFileException, RemoteException {
         if (!name.startsWith("/")) {
             throw new RemoteException("Invalid file name: "+name);
         }
@@ -433,27 +846,47 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
             throw new NoSuchFileException(name);
         }
 
-        if (name.indexOf('/') > -1) {
-            throw new NoSuchFileException(name);
-        }
+        ProcFNSParts parts = parseProcFNSParts(name);
 
-        int pid;
-        try {
-            pid = Integer.parseInt(name);
-        } catch (NumberFormatException e) {
-            throw new NoSuchFileException(name);
-        }
-
-        ProcessManagerServer.Proc proc = processMap.get(pid);
+        ProcessManagerServer.Proc proc = processMap.get(parts.pid);
         if (proc == null) {
             throw new NoSuchFileException(name);
         }
+
+        if (parts.component == null) {
+            throw new NoSuchFileException(name);
+        }
+
+        if (parts.component == ComponentEnum.FILES) {
+
+            if (parts.operand == null) {
+                throw new NoSuchFileException(name);
+            } else {
+                throw new NoSuchFileException(name);
+            }
+        } else if (parts.component == ComponentEnum.CMDLINE) {
+            if (parts.operand == null) {
+                StringBuilder pdb = new StringBuilder();
+                pdb.append(proc.cmd);
+                for (String arg : proc.args) {
+                    pdb.append(" " + arg);
+                }
+                pdb.append("\n");
+                return new StringRemoteFileAccessor(pdb.toString());
+            }
+        } else {
+            throw new NoSuchFileException(name);
+        }
+
+        throw new NoSuchFileException(name);
+        /*
         StringBuilder pdb = new StringBuilder();
-        pdb.append("PID="+Integer.toString(pid)+"\n");
+        pdb.append("PID="+Integer.toString(pidFile)+"\n");
         pdb.append("PPID="+proc.parentId+"\n");
         pdb.append("StartTime="+String.format("%1$tb %1$td %1$tY  %1$tH:%1$tM:%1$tS\n",proc.startTime));
         pdb.append("Command="+proc.cmd+"\n");
-        return new StringFileChannel(pdb.toString());
+        return new StringRemoteFileAccessor(pdb.toString());
+        */
     }
 
     @Override
@@ -461,10 +894,61 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
         return null;
     }
 
+    @Override
+    public List<FileAccessorStatistics> getOpenFiles(int pid) throws RemoteException {
+        return null;
+    }
+
+    // End of FileNameSpace interface implementation
+
     long getStartUpTime() {
         return startUpTime;
     }
 
+    /**
+     * Break a FileNameSpace name into parts and parse into the structure of the proc FileNameSpace
+     *
+     * @param name
+     * @return
+     * @throws NoSuchFileException
+     */
+    ProcFNSParts parseProcFNSParts(String name) throws NoSuchFileException {
+        String[] names = name.split("/");
+
+        ProcFNSParts rtrn = new ProcFNSParts();
+
+        if (names.length > 0) {
+            try {
+                rtrn.pid = Integer.parseInt(names[0]);
+            } catch (NumberFormatException e) {
+                throw new NoSuchFileException(name);
+            }
+        }
+        if (names.length > 1) {
+            if (names[1].equals("files")) {
+                rtrn.component = ComponentEnum.FILES;
+            } else if (names[1].equals("cmdline")) {
+                rtrn.component = ComponentEnum.CMDLINE;
+            } else {
+                throw new NoSuchFileException(name);
+            }
+        }
+        if (names.length > 2) {
+            throw new NoSuchFileException(name);
+        }
+
+        return rtrn;
+    }
+
+    private static class ProcFNSParts {
+        int pid;
+        ComponentEnum component;
+        String operand;
+    }
+
+    private enum ComponentEnum {
+        CMDLINE, CWD, EXE, FILES, FILEINFO
+    }
     /**
      * Shutdown the ProcessManager. To cleanly shutdown, first shutdown all process groups by identifying
      * processes with parentId 0. Shutdown the groups from process tree leaf back to root (recursive).
@@ -491,6 +975,7 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
             killProcessGroup(id);
         }
 
+
         state = State.SHUTDOWN;
     }
 
@@ -507,19 +992,17 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
         }
 
         final Semaphore waitObj = new Semaphore(0);
-        try {
-            registerEventNotificationHandler(id, EventName.DEREGISTER, new EventNotificationHandler() {
-                @Override
-                public void handleEventNotification(EventName event, Object eventData) throws RemoteException {
-                    if (event == EventName.DEREGISTER) {
-                        waitObj.release();
-                    }
-                }
-            });
-        } catch (RemoteException e) {
-            // will not happen as not remote call.
-        }
 
+        registerEventNotificationHandler(id, EventName.DEREGISTER, new EventNotificationHandler() {
+            @Override
+            public void handleEventNotification(EventName event, Object eventData) throws RemoteException {
+                if (event == EventName.DEREGISTER) {
+                    waitObj.release();
+                }
+            }
+        });
+
+        logger.info("Shuting down process: " + id);
         sendSignal(id, Signal.TERMINATE); // TODO possible that the process is no longer running.
 
         try {
@@ -532,21 +1015,24 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
     static class Proc {
         int id;
         int parentId;
+        int processGroup;
+        short terminal;
+        ProcessManager.ProcessState state;
         String cmd;
         String[] args;
         long startTime;
         Process osProcess;
         boolean isZombie;
+        int sessionId;
         List<Proc> children;
-        Map<EventName, Object> eventWaiters;
+        Map<EventName, ChildWaitObject> eventWaiters;
         Map<EventName, List<EventNotificationHandler>> eventHandlers;
         Deque<Signal> pendingSignals;
     }
 
     private static class ChildWaitObject {
         int waiterCount; // the number of waiters for this child event
-        int pid; // set to the pid of the child that triggered this event. The first waiter to lock this object must
-                 // set the value back to 0
+        Deque<Proc> processList = new LinkedList<>(); // a list of processes that have triggered a child Event
     }
 
     private static enum State {

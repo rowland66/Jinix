@@ -1,26 +1,31 @@
 package org.rowland.jinix.io;
 
 import org.rowland.jinix.lang.JinixRuntime;
-import org.rowland.jinix.naming.FileChannel;
 import org.rowland.jinix.naming.FileNameSpace;
 import org.rowland.jinix.naming.LookupResult;
+import org.rowland.jinix.nio.JinixFileChannel;
 
 import java.io.*;
+import java.nio.channels.NonReadableChannelException;
+import java.nio.channels.NonWritableChannelException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
+import java.rmi.NoSuchObjectException;
+import java.rmi.RemoteException;
 import java.util.EnumSet;
 import java.util.Set;
 
 /**
  * Created by rsmith on 12/23/2016.
  */
-public class JinixRandomAccessFile /*implements DataOutput, DataInput*/ {
+public class JinixRandomAccessFile {
 
     private JinixFileDescriptor fd;
+    private JinixFileChannel channel = null;
 
-    private boolean rw;
+    Set<StandardOpenOption> options;
 
     public JinixRandomAccessFile(String name, String mode)
             throws FileNotFoundException {
@@ -32,18 +37,17 @@ public class JinixRandomAccessFile /*implements DataOutput, DataInput*/ {
         String name = (file != null ? file.getPath() : null);
 
         boolean modeStringError = false;
-        Set<StandardOpenOption> optionSet = EnumSet.noneOf(StandardOpenOption.class);
+        options = EnumSet.noneOf(StandardOpenOption.class);
         if (mode.equals("r"))
-            optionSet.add(StandardOpenOption.READ);
+            options.add(StandardOpenOption.READ);
         else if (mode.startsWith("rw")) {
-            optionSet.add(StandardOpenOption.READ);
-            optionSet.add(StandardOpenOption.WRITE);
-            rw = true;
+            options.add(StandardOpenOption.READ);
+            options.add(StandardOpenOption.WRITE);
             if (mode.length() > 2) {
                 if (mode.equals("rws"))
-                    optionSet.add(StandardOpenOption.SYNC);
+                    options.add(StandardOpenOption.SYNC);
                 else if (mode.equals("rwd"))
-                    optionSet.add(StandardOpenOption.DSYNC);
+                    options.add(StandardOpenOption.DSYNC);
                 else
                     modeStringError = true;
             }
@@ -61,10 +65,10 @@ public class JinixRandomAccessFile /*implements DataOutput, DataInput*/ {
         }
 
         try {
+            int pid = JinixRuntime.getRuntime().getPid();
             LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(file.getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
-            fd = new JinixFileDescriptor(fns.getFileChannel(
-                    lookup.remainingPath, optionSet.toArray(new OpenOption[optionSet.size()])));
+            fd = new JinixFileDescriptor(fns.getRemoteFileAccessor(pid, lookup.remainingPath, options));
         } catch (NoSuchFileException | FileAlreadyExistsException e) {
             throw new FileNotFoundException("File: "+file.toString());
         } catch (IOException e) {
@@ -72,9 +76,61 @@ public class JinixRandomAccessFile /*implements DataOutput, DataInput*/ {
         }
     }
 
+    /**
+     * Returns the opaque file descriptor object associated with this
+     * stream.
+     *
+     * @return     the file descriptor object associated with this stream.
+     * @exception  IOException  if an I/O error occurs.
+     * @see        java.io.FileDescriptor
+     */
+    public final JinixFileDescriptor getFD() throws IOException {
+        if (fd != null) {
+            return fd;
+        }
+        throw new IOException();
+    }
+
+    /**
+     * Returns the unique {@link java.nio.channels.FileChannel RemoteFileAccessor}
+     * object associated with this file.
+     *
+     * <p> The {@link java.nio.channels.FileChannel#position()
+     * position} of the returned channel will always be equal to
+     * this object's file-pointer offset as returned by the {@link
+     * #getFilePointer getFilePointer} method.  Changing this object's
+     * file-pointer offset, whether explicitly or by reading or writing bytes,
+     * will change the position of the channel, and vice versa.  Changing the
+     * file's length via this object will change the length seen via the file
+     * channel, and vice versa.
+     *
+     * @return  the file channel associated with this file
+     *
+     * @since 1.4
+     * @spec JSR-51
+     */
+    public synchronized final JinixFileChannel getChannel() {
+        try {
+            if (channel == null) {
+                channel = JinixFileChannel.open(fd, options, this);
+            }
+            return channel;
+        } catch (IOException e) {
+            throw new RuntimeException("IOException opening JinixFileChanel", e);
+        }
+    }
+
     public int read() throws IOException {
-        byte[] b = fd.getHandle().read(1);
-        return (int) b[0];
+        try {
+            byte[] b = fd.getHandle().read(JinixRuntime.getRuntime().getProcessGroupId(), 1);
+            return (int) b[0];
+        } catch (NonReadableChannelException e) {
+            throw new IOException("Illegal attempt to read from a non-readable file descriptor");
+        } catch (NoSuchObjectException e) {
+            throw new IOException("JinixRandomAccessFile: RemoteFileAccessor has been deleted");
+        } catch (RemoteException e) {
+            throw new IOException("JinixRandomAccessFile: Jinix server failure", e.getCause());
+        }
     }
 
     public int read(byte b[], int off, int len) throws IOException {
@@ -86,14 +142,22 @@ public class JinixRandomAccessFile /*implements DataOutput, DataInput*/ {
             return 0;
         }
 
-        byte[] rb = fd.getHandle().read(len);
+        try {
+            byte[] rb = fd.getHandle().read(JinixRuntime.getRuntime().getProcessGroupId(), len);
 
-        if (rb == null) {
-            return -1;
+            if (rb == null) {
+                return -1;
+            }
+
+            System.arraycopy(rb, 0, b, off, rb.length);
+            return rb.length;
+        } catch (NonReadableChannelException e) {
+            throw new IOException("Illegal attempt to read from a non-readable file descriptor");
+        } catch (NoSuchObjectException e) {
+            throw new IOException("JinixRandomAccessFile: RemoteFileAccessor has been deleted");
+        } catch (RemoteException e) {
+            throw new IOException("JinixRandomAccessFile: Jinix server failure", e.getCause());
         }
-
-        System.arraycopy(rb, 0, b, off, rb.length);
-        return rb.length;
     }
 
     public int read(byte b[]) throws IOException {
@@ -136,9 +200,17 @@ public class JinixRandomAccessFile /*implements DataOutput, DataInput*/ {
 
     public void write(int b) throws IOException {
 
-        byte[] wb = new byte[1];
-        wb[0] = (byte) b;
-        fd.getHandle().write(wb);
+        try {
+            byte[] wb = new byte[1];
+            wb[0] = (byte) b;
+            fd.getHandle().write(JinixRuntime.getRuntime().getProcessGroupId(), wb);
+        } catch (NonWritableChannelException e) {
+            throw new IOException("Illegal attempt to write to a non-writable file descriptor");
+        } catch (NoSuchObjectException e) {
+            throw new IOException("JinixRandomAccessFile: RemoteFileAccessor has been deleted");
+        } catch (RemoteException e) {
+            throw new IOException("JinixRandomAccessFile: Jinix server failure", e.getCause());
+        }
     }
 
     public void write(byte b[]) throws IOException {
@@ -153,7 +225,15 @@ public class JinixRandomAccessFile /*implements DataOutput, DataInput*/ {
             wb = new byte[len];
             System.arraycopy(b, off, wb, 0, len);
         }
-        fd.getHandle().write(wb);
+        try {
+            fd.getHandle().write(JinixRuntime.getRuntime().getProcessGroupId(), wb);
+        } catch (NonWritableChannelException e) {
+            throw new IOException("Illegal attempt to write to a non-writable file descriptor");
+        } catch (NoSuchObjectException e) {
+            throw new IOException("JinixRandomAccessFile: RemoteFileAccessor has been deleted");
+        } catch (RemoteException e) {
+            throw new IOException("JinixRandomAccessFile: Jinix server failure", e.getCause());
+        }
     }
 
     public long getFilePointer() throws IOException {
@@ -277,10 +357,6 @@ public class JinixRandomAccessFile /*implements DataOutput, DataInput*/ {
         return input.toString();
     }
 
-    //public final String readUTF() throws IOException {
-    //    return DataInputStream.readUTF(this);
-    //}
-
     public final void writeBoolean(boolean v) throws IOException {
         write(v ? 1 : 0);
         //written++;
@@ -331,6 +407,31 @@ public class JinixRandomAccessFile /*implements DataOutput, DataInput*/ {
         writeLong(Double.doubleToLongBits(v));
     }
 
+    /**
+     * Writes the string to the file as a sequence of bytes. Each
+     * character in the string is written out, in sequence, by discarding
+     * its high eight bits. The write starts at the current position of
+     * the file pointer.
+     *
+     * @param      s   a string of bytes to be written.
+     * @exception  IOException  if an I/O error occurs.
+     */
+    @SuppressWarnings("deprecation")
+    public final void writeBytes(String s) throws IOException {
+        int len = s.length();
+        byte[] b = new byte[len];
+        s.getBytes(0, len, b, 0);
+        try {
+            fd.getHandle().write(JinixRuntime.getRuntime().getProcessGroupId(), b);
+        } catch (NonWritableChannelException e) {
+            throw new IOException("Illegal attempt to write to a non-writable file descriptor");
+        } catch (NoSuchObjectException e) {
+            throw new IOException("JinixRandomAccessFile: RemoteFileAccessor has been deleted");
+        } catch (RemoteException e) {
+            throw new IOException("JinixRandomAccessFile: Jinix server failure", e.getCause());
+        }
+    }
+
     public final void writeChars(String s) throws IOException {
         int clen = s.length();
         int blen = 2*clen;
@@ -343,9 +444,4 @@ public class JinixRandomAccessFile /*implements DataOutput, DataInput*/ {
         }
         write(b, 0, blen);
     }
-
-    //public final void writeUTF(String str) throws IOException {
-    //    DataOutputStream.writeUTF(str, this);
-    //}
-
 }

@@ -5,19 +5,17 @@ import org.rowland.jinix.exec.ExecServer;
 import org.rowland.jinix.exec.InvalidExecutableException;
 import org.rowland.jinix.naming.*;
 import org.rowland.jinix.proc.ProcessManager;
+import org.rowland.jinix.proc.RegisterResult;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.JarURLConnection;
-import java.net.URL;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardOpenOption;
 import java.rmi.RemoteException;
 import java.util.*;
-import java.util.jar.Attributes;
 import java.util.logging.Logger;
 
 import static org.rowland.jinix.JinixKernel.consoleLogging;
@@ -47,9 +45,9 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
     }
 
     @Override
-    public int execTranslator(String cmd, String[] args, FileChannel translatorNode, String translatorNodePath)
+    public int execTranslator(String cmd, String[] args, RemoteFileAccessor translatorNode, String translatorNodePath)
             throws FileNotFoundException, InvalidExecutableException, RemoteException {
-        return exec0(null, cmd, args, -1,
+        return exec0(null, cmd, args, -1, -1,
                 null, null, null,
                 translatorNode, translatorNodePath, "file://"+cmd);
     }
@@ -59,21 +57,23 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                     String cmd,
                     String[] args,
                     int parentId,
-                    FileChannel stdIn,
-                    FileChannel stdOut,
-                    FileChannel stdErr)
+                    int processGroupId,
+                    RemoteFileAccessor stdIn,
+                    RemoteFileAccessor stdOut,
+                    RemoteFileAccessor stdErr)
             throws FileNotFoundException, InvalidExecutableException, RemoteException {
-        return exec0(env, cmd, args, parentId, stdIn, stdOut, stdErr, null, null, null);
+        return exec0(env, cmd, args, parentId, processGroupId, stdIn, stdOut, stdErr, null, null, null);
     }
 
     private int exec0(Properties env,
                       String cmd,
                       String[] args,
                       int parentId,
-                      FileChannel stdIn,
-                      FileChannel stdOut,
-                      FileChannel stdErr,
-                      FileChannel translatorNode,
+                      int processGroupId,
+                      RemoteFileAccessor stdIn,
+                      RemoteFileAccessor stdOut,
+                      RemoteFileAccessor stdErr,
+                      RemoteFileAccessor translatorNode,
                       String translatorNodePath,
                       String codebaseURL)
             throws FileNotFoundException, InvalidExecutableException, RemoteException {
@@ -82,10 +82,10 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
         LookupResult lookup = this.ns.lookup(cmd);
         FileNameSpace fs = (FileNameSpace) lookup.remote;
         StringBuilder redirectExecutable = new StringBuilder(128);
-        FileChannel cmdFd = null;
+        RemoteFileAccessor cmdFd = null;
         try {
             try {
-                cmdFd = fs.getFileChannel(lookup.remainingPath, StandardOpenOption.READ);
+                cmdFd = fs.getRemoteFileAccessor(-1, lookup.remainingPath, EnumSet.of(StandardOpenOption.READ));
             } catch (FileAlreadyExistsException e) {
                 throw new RuntimeException("Internal Error",e); // should never happen
             } catch (NoSuchFileException e) {
@@ -114,7 +114,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
             fs = (FileNameSpace) lookup.remote;
             try {
                 try {
-                    cmdFd = fs.getFileChannel(lookup.remainingPath, StandardOpenOption.READ);
+                    cmdFd = fs.getRemoteFileAccessor(-1, lookup.remainingPath, EnumSet.of(StandardOpenOption.READ));
                 } catch (FileAlreadyExistsException e) {
                     throw new RuntimeException("Internal Error",e); // should never happen
                 } catch (NoSuchFileException e) {
@@ -132,7 +132,9 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
             }
         }
 
-        final int pid = pm.registerProcess(parentId, cmd, args);
+        RegisterResult result = pm.registerProcess(parentId, processGroupId, cmd, args);
+        final int pid = result.pid;
+        final int pgid = result.pgid;
 
         String javaCmd = "java";
         if (javaHome != null) {
@@ -144,8 +146,10 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
         cmdList.add(javaCmd);
         cmdList.add("-Xbootclasspath/p:" +
                 "./lib/Runtime.jar" + File.pathSeparator +
+                "./lib/PlatformRuntime.jar" + File.pathSeparator +
                 "./lib/ProgrammingInterface.jar" + File.pathSeparator +
                 "./lib/ServerInterfaces.jar");
+        cmdList.add("-javaagent:./lib/RuntimeAgent.jar");
         cmdList.add("-Djava.nio.file.spi.DefaultFileSystemProvider=org.rowland.jinix.nio.JinixFileSystemProvider");
         //cmdList.add("-Dsun.misc.URLClassPath.debug=true");
         //cmdList.add("-Djava.security.debug=\"access,failure\"");
@@ -184,6 +188,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
 
         cmdList.add("org.rowland.jinix.exec.ExecLauncher");
         cmdList.add(Integer.toString(pid));
+        cmdList.add(Integer.toString(pgid));
 
         if (rmiMode == JinixKernel.RMI_MODE.AFUNIX) {
             cmdList.add("rmi=AFUNIX");
@@ -217,8 +222,9 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
 
         try {
             final Process osProcess = runtime.exec(cmdArray);
-            //registerOSProcess(pid, osProcess); //TODO: figure out how to handle the OS process as Process is not serializable
+            //registerOSProcess(pid, osProcess); //TODO: figure out how to handle the OS process as ProcessData is not serializable
 
+            /*
             (new Thread(new Runnable() {
                 public void run() {
                     try {
@@ -269,8 +275,10 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                 }
             }});
             stdErrThread.start();
+        */
         } catch (IOException e) {
-            e.printStackTrace();
+            pm.deRegisterProcess(pid);
+            throw new RemoteException("Failure starting underlying OS process.", e);
         }
 
         return pid;
@@ -301,9 +309,9 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
         return rtrn;
     }
 
-    private static boolean isValidExecutable(FileChannel cmd, StringBuilder redirectExecutable) {
+    private static boolean isValidExecutable(RemoteFileAccessor cmd, StringBuilder redirectExecutable) {
         try {
-            byte[] magicBytes = cmd.read(2);
+            byte[] magicBytes = cmd.read(0,2);
             if (magicBytes == null || magicBytes.length < 2) {
                 return false;
             }
@@ -316,10 +324,10 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                 }
                 int i = 0;
                 byte[] execBytes = new byte[128];
-                byte[] b = cmd.read(1);
+                byte[] b = cmd.read(0,1);
                 while (b != null && b[0] != 0x0A) {
                     redirectExecutable.append((char) b[0]);
-                    b = cmd.read(1);
+                    b = cmd.read(0,1);
                 }
                 if (b == null) {
                     return false; // reaching the end of the file before a newline is invalid
@@ -373,11 +381,11 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
     private static class ExecLauncherCallbackData {
         String cmd;
         String[] args;
-        FileChannel stdIn;
-        FileChannel stdOut;
-        FileChannel stdErr;
+        RemoteFileAccessor stdIn;
+        RemoteFileAccessor stdOut;
+        RemoteFileAccessor stdErr;
         Properties environment;
-        FileChannel translatorNode;
+        RemoteFileAccessor translatorNode;
         String translatorNodePath;
     }
 }

@@ -29,6 +29,7 @@ import java.nio.channels.FileChannel;
 import java.security.AccessControlException;
 
 import org.rowland.jinix.io.JinixFile;
+import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixFileOutputStream;
 import org.rowland.jinix.io.JinixNativeAccessPermission;
 import sun.nio.ch.FileChannelImpl;
@@ -229,9 +230,8 @@ class FileOutputStream extends OutputStream
             throw new FileNotFoundException("Invalid file path");
         }
 
-        this.append = append;
-
         if (!jinixOnly) {
+            this.append = append;
             this.fd = new FileDescriptor();
             this.path = name;
             fd.attach(this);
@@ -239,7 +239,7 @@ class FileOutputStream extends OutputStream
         } else {
             this.fd = null;
             this.path = null;
-
+            this.append = false;
             jinixFileOutputStream = new JinixFileOutputStream(new JinixFile(file.getPath()), append);
         }
     }
@@ -268,20 +268,36 @@ class FileOutputStream extends OutputStream
      * @see        java.lang.SecurityManager#checkWrite(java.io.FileDescriptor)
      */
     public FileOutputStream(FileDescriptor fdObj) {
-        SecurityManager security = System.getSecurityManager();
+        SecurityManager securityManager = System.getSecurityManager();
         if (fdObj == null) {
             throw new NullPointerException();
         }
-        if (security != null) {
-            security.checkWrite(fdObj);
+
+        boolean jinixOnly = false;
+
+        if (securityManager != null) {
+            try {
+                securityManager.checkPermission(new JinixNativeAccessPermission());
+            } catch (AccessControlException e) {
+                jinixOnly = true;
+            }
         }
-        this.fd = fdObj;
-        this.append = false;
-        this.path = null;
 
-        fd.attach(this);
+        if (!jinixOnly) {
+            if (securityManager != null) {
+                securityManager.checkWrite(fdObj);
+            }
+            this.fd = fdObj;
+            this.append = false;
+            this.path = null;
 
-        jinixFileOutputStream = null;
+            fd.attach(this);
+        } else {
+            this.fd = null;
+            this.path = null;
+            this.append = false;
+            jinixFileOutputStream = new JinixFileOutputStream((JinixFileDescriptor) fdObj);
+        }
     }
 
     /**
@@ -411,12 +427,17 @@ class FileOutputStream extends OutputStream
      * @see        java.io.FileDescriptor
      */
     public final FileDescriptor getFD()  throws IOException {
+
+        if (jinixFileOutputStream != null) {
+            return jinixFileOutputStream.getFD();
+        }
+
         if (fd != null) return fd;
         throw new IOException();
     }
 
     /**
-     * Returns the unique {@link java.nio.channels.FileChannel FileChannel}
+     * Returns the unique {@link java.nio.channels.FileChannel RemoteFileAccessor}
      * object associated with this file output stream. </p>
      *
      * <p> The initial {@link java.nio.channels.FileChannel#position()

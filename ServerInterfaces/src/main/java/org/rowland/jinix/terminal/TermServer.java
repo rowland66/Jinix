@@ -1,7 +1,6 @@
 package org.rowland.jinix.terminal;
 
-import org.rowland.jinix.naming.FileChannel;
-import org.rowland.jinix.naming.FileNameSpace;
+import org.rowland.jinix.naming.RemoteFileAccessor;
 
 import java.rmi.Remote;
 import java.rmi.RemoteException;
@@ -31,9 +30,11 @@ public interface TermServer extends Remote {
      */
     short createTerminal(Map<PtyMode, Integer> ttyOptions) throws RemoteException;
 
-    FileChannel getTerminalMaster(short termId) throws RemoteException;
+    RemoteFileAccessor getTerminalMaster(short termId) throws RemoteException;
 
-    FileChannel getTerminalSlave(short termId) throws RemoteException;
+    RemoteFileAccessor getTerminalSlave(short termId) throws RemoteException;
 
     void linkProcessToTerminal(short termId, int pid) throws RemoteException;
+
+    void setTerminalForegroundProcessGroup(short termId, int processGroupId) throws RemoteException;
 }

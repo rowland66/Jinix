@@ -70,8 +70,6 @@ class FileInputStream extends InputStream
             new ThreadLocal<>();
 
     private JinixFileInputStream jinixFileInputStream = null;
-    private JinixFileDescriptor jinixFd = null;
-    private JinixFileChannel jinixChannel = null;
 
     private static boolean isRunningFinalize() {
         Boolean val;
@@ -140,7 +138,6 @@ class FileInputStream extends InputStream
      */
     public FileInputStream(File file) throws FileNotFoundException {
 
-        String name = (file != null ? file.getPath() : null);
         SecurityManager securityManager = System.getSecurityManager();
         boolean jinixOnly = false;
 
@@ -152,25 +149,25 @@ class FileInputStream extends InputStream
             }
         }
 
-        if (name == null) {
-            throw new NullPointerException();
-        }
-
-        if (file.isInvalid()) {
-            throw new FileNotFoundException("Invalid file path");
-        }
-
         if (!jinixOnly) {
+            String name = (file != null ? file.getPath() : null);
+
+            if (name == null) {
+                throw new NullPointerException();
+            }
+
+            if (file.isInvalid()) {
+                throw new FileNotFoundException("Invalid file path");
+            }
             fd = new FileDescriptor();
             fd.attach(this);
             this.path = name;
             open(name);
         } else {
             this.fd = null;
-            this.path = name;
+            this.path = null;
 
             jinixFileInputStream = new JinixFileInputStream(new JinixFile(file.getPath()));
-            jinixFd = jinixFileInputStream.getFD();
         }
     }
 
@@ -200,25 +197,40 @@ class FileInputStream extends InputStream
      */
     public FileInputStream(FileDescriptor fdObj) {
 
-        SecurityManager security = System.getSecurityManager();
-        if (fdObj == null) {
-            throw new NullPointerException();
+        SecurityManager securityManager = System.getSecurityManager();
+        boolean jinixOnly = false;
+
+        if (securityManager != null) {
+            try {
+                securityManager.checkPermission(new JinixNativeAccessPermission());
+            } catch (AccessControlException e) {
+                jinixOnly = true;
+            }
         }
-        if (security != null) {
-            security.checkRead(fdObj);
+
+        if (!jinixOnly) {
+            if (fdObj == null) {
+                throw new NullPointerException();
+            }
+
+            if (securityManager != null) {
+                securityManager.checkRead(fdObj);
+            }
+
+            fd = fdObj;
+            path = null;
+
+            /*
+             * FileServer is being shared by streams.
+             * Ensure that it's GC'ed only when all the streams/channels are done
+             * using it.
+             */
+            fd.attach(this);
+        } else {
+            fd = null;
+            path = null;
+            this.jinixFileInputStream = new JinixFileInputStream((JinixFileDescriptor) fdObj);
         }
-
-        fd = fdObj;
-        path = null;
-
-        /*
-         * FileServer is being shared by streams.
-         * Ensure that it's GC'ed only when all the streams/channels are done
-         * using it.
-         */
-        fd.attach(this);
-
-        this.jinixFileInputStream = null;
     }
 
     /**
@@ -423,7 +435,7 @@ class FileInputStream extends InputStream
     public final FileDescriptor getFD() throws IOException {
         //TODO: Add support for FileDescriptors using Jinix
         if (jinixFileInputStream != null) {
-            throw new RuntimeException("Operation not supported: getFD()");
+            return jinixFileInputStream.getFD();
         }
 
         if (fd != null) return fd;
@@ -431,7 +443,7 @@ class FileInputStream extends InputStream
     }
 
     /**
-     * Returns the unique {@link java.nio.channels.FileChannel FileChannel}
+     * Returns the unique {@link java.nio.channels.FileChannel RemoteFileAccessor}
      * object associated with this file input stream.
      *
      * <p> The initial {@link java.nio.channels.FileChannel#position()
@@ -447,15 +459,8 @@ class FileInputStream extends InputStream
      * @spec JSR-51
      */
     public synchronized FileChannel getChannel() {
-        try {
-            if (jinixFileInputStream != null) {
-                if (jinixChannel == null) {
-                    jinixChannel = JinixFileChannel.open(jinixFd);
-                }
-                return jinixChannel;
-            }
-        } catch (IOException e) {
-
+        if (jinixFileInputStream != null) {
+            return jinixFileInputStream.getChannel();
         }
 
         if (channel == null) {

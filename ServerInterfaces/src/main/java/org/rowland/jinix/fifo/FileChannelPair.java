@@ -1,7 +1,6 @@
 package org.rowland.jinix.fifo;
 
-import org.rowland.jinix.naming.FileChannel;
-import org.rowland.jinix.naming.FileNameSpace;
+import org.rowland.jinix.naming.RemoteFileAccessor;
 
 import java.io.Serializable;
 
@@ -10,19 +9,19 @@ import java.io.Serializable;
  */
 public class FileChannelPair implements Serializable {
 
-    private FileChannel input;
-    private FileChannel output;
+    private RemoteFileAccessor input;
+    private RemoteFileAccessor output;
 
-    public FileChannelPair(FileChannel inputFd, FileChannel outputFd) {
+    public FileChannelPair(RemoteFileAccessor inputFd, RemoteFileAccessor outputFd) {
         input = inputFd;
         output = outputFd;
     }
 
-    public FileChannel getInput() {
+    public RemoteFileAccessor getInput() {
         return input;
     }
 
-    public FileChannel getOutput() {
+    public RemoteFileAccessor getOutput() {
         return output;
     }
 }

@@ -2,90 +2,82 @@ package org.rowland.jinix.nio;
 
 import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.lang.JinixRuntime;
-import org.rowland.jinix.naming.FileNameSpace;
-import org.rowland.jinix.naming.LookupResult;
-import org.rowland.jinix.naming.RemainingPath;
+import org.rowland.jinix.naming.RemoteFileAccessor;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
-import java.nio.channels.FileChannel;
-import java.nio.channels.FileLock;
-import java.nio.channels.ReadableByteChannel;
-import java.nio.channels.WritableByteChannel;
-import java.nio.file.NoSuchFileException;
+import java.nio.channels.*;
 import java.nio.file.OpenOption;
-import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.FileAttribute;
-import java.rmi.Remote;
-import java.rmi.RemoteException;
-import java.util.Collections;
 import java.util.Set;
 
 /**
- * A FileChannel for the Jinix OS.
+ * A RemoteFileAccessor for the Jinix OS.
  */
 public class JinixFileChannel extends FileChannel {
 
-    private org.rowland.jinix.naming.FileChannel raf;
+    private RemoteFileAccessor raf;
+
+    // File access mode options(immutable)
+    private Set<? extends OpenOption> options;
+    private Object parent;
+
+    // Lock for operations involving position and size
+    private final Object positionLock = new Object();
+
+    public static JinixFileChannel open(JinixFileDescriptor fd, Set<? extends OpenOption> options, Object parent)
+        throws IOException {
+        // Throws FileAlreadyExistsException with CREATE_NEW option
+        return new JinixFileChannel(fd.getHandle(), options, parent);
+    }
 
     /**
      * Get a JinixFileChannel from an existing filedescriptor. The channel will be open with the same
      * options that created the filedescriptor.
      *
-     * @param fd
+     * @param fc the RemoteFileAccessor underlying channel
+     * @param options the options that describe the mode in which the underlying RemoteFileAccessor was opened.
+     * @param parent the object that called this method and provided the RemoteFileAccessor
      * @return
      * @throws IOException
      */
-    public static JinixFileChannel open(JinixFileDescriptor fd)
-            throws IOException {
-        return new JinixFileChannel(fd.getHandle());
-    }
-
-    public static JinixFileChannel open(JinixFileDescriptor fd, Set<? extends OpenOption> options, FileAttribute<?>[] attrs)
-        throws IOException {
-        // Throws FileAlreadyExistsException with CREATE_NEW option
-        org.rowland.jinix.naming.FileChannel raf = fd.getHandle();
-        return new JinixFileChannel(raf);
-
-    }
-
-    JinixFileChannel(Path path, Set<? extends OpenOption> options, FileAttribute<?>[] attrs)
+    private JinixFileChannel(RemoteFileAccessor fc, Set<? extends OpenOption> options, Object parent)
             throws IOException {
         super();
-        try {
-            // Throws FileAlreadyExistsException with CREATE_NEW option
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
-                    path.toAbsolutePath().toString());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            raf = fns.getFileChannel(
-                    lookup.remainingPath,
-                    options.toArray(new OpenOption[options.size()]));
-        } catch (RemoteException e) {
-            throw new IOException("IOException creating file channel", e.getCause());
-        }
-    }
-
-    private JinixFileChannel(org.rowland.jinix.naming.FileChannel fc) {
         raf = fc;
+        this.options = options;
+        this.parent = parent;
     }
 
     @Override
     public int read(ByteBuffer dst) throws IOException {
-        int len = dst.remaining();
-        byte[] b = raf.read(len);
-        if (b == null) {
-            return -1;
+        ensureOpen();
+        if (!options.contains(StandardOpenOption.READ)) {
+            throw new NonReadableChannelException();
         }
-        dst.put(b);
-        return b.length;
+        synchronized (positionLock) {
+
+            int len = dst.remaining();
+            byte[] b = raf.read(JinixRuntime.getRuntime().getProcessGroupId(), len);
+            if (b == null) {
+                return -1;
+            }
+            dst.put(b);
+            return b.length;
+        }
     }
 
     @Override
     public int write(ByteBuffer src) throws IOException {
+        ensureOpen();
+        if (!options.contains(StandardOpenOption.WRITE)) {
+            throw new NonWritableChannelException();
+        }
         byte[] b = new byte[src.remaining()];
         src.get(b);
-        raf.write(b);
+        raf.write(JinixRuntime.getRuntime().getProcessGroupId(), b);
         return b.length;
     }
 
@@ -96,6 +88,9 @@ public class JinixFileChannel extends FileChannel {
 
     @Override
     public FileChannel position(long newPosition) throws IOException {
+        ensureOpen();
+        if (newPosition < 0)
+            throw new IllegalArgumentException();
         raf.seek(newPosition);
         return this;
     }
@@ -120,31 +115,51 @@ public class JinixFileChannel extends FileChannel {
 
     @Override
     public long read(ByteBuffer[] dsts, int offset, int length) throws IOException {
-        int i = 0;
+        if ((offset < 0) || (length < 0) || (offset > dsts.length - length))
+            throw new IndexOutOfBoundsException();
+        ensureOpen();
+        if (!options.contains(StandardOpenOption.READ)) {
+            throw new NonReadableChannelException();
+        }
+        int count = offset + length;
+        int i = offset;
         long totalBytes = 0;
-        int len = dsts[i].limit() - offset;
-        byte[] b = raf.read(len);
+        int len = dsts[i].limit();
+        byte[] b = raf.read(JinixRuntime.getRuntime().getProcessGroupId(), len);
         if (b == null) {
             return -1;
         }
-        while (b != null) {
-            dsts[i++].put(b, offset, len);
+        while (i < count && b != null) {
+            dsts[i++].put(b);
             len = dsts[i].limit();
-            offset = 0;
             totalBytes += b.length;
-            b = raf.read(len);
+            b = raf.read(JinixRuntime.getRuntime().getProcessGroupId(), len);
         }
         return totalBytes;
     }
 
     @Override
     public long write(ByteBuffer[] srcs, int offset, int length) throws IOException {
-        return 0;
+        if ((offset < 0) || (length < 0) || (offset > srcs.length - length))
+            throw new IndexOutOfBoundsException();
+        ensureOpen();
+        if (!options.contains(StandardOpenOption.WRITE))
+            throw new NonWritableChannelException();
+        int count = offset + length;
+        int i = offset;
+        long bytesWritten = 0;
+        while (i < count) {
+            byte[] b = new byte[srcs[i].remaining()];
+            srcs[i++].get(b);
+            bytesWritten += raf.write(JinixRuntime.getRuntime().getProcessGroupId(), b);
+        }
+        return bytesWritten;
     }
 
     @Override
     public void force(boolean metaData) throws IOException {
-
+        ensureOpen();
+        raf.force(metaData);
     }
 
     @Override
@@ -188,4 +203,10 @@ public class JinixFileChannel extends FileChannel {
     protected void implCloseChannel() throws IOException {
         raf.close();
     }
+
+    private void ensureOpen() throws IOException {
+        if (!isOpen())
+            throw new ClosedChannelException();
+    }
+
 }

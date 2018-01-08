@@ -7,5 +7,11 @@ import org.rowland.jinix.proc.ProcessManager;
  */
 public interface ProcessSignalHandler {
 
-    void handleSignal(ProcessManager.Signal signal);
+    /**
+     * Handle a signal
+     *
+     * @param signal
+     * @return true if the signal is handled, false to let Jinix handle the signal
+     */
+    boolean handleSignal(ProcessManager.Signal signal);
 }

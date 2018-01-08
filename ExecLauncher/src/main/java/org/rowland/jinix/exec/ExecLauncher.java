@@ -1,5 +1,6 @@
 package org.rowland.jinix.exec;
 
+import org.rowland.jinix.IllegalOperationException;
 import org.rowland.jinix.fifo.FifoServer;
 import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixFileInputStream;
@@ -11,6 +12,7 @@ import org.rowland.jinix.lang.ProcessSignalHandler;
 import org.rowland.jinix.naming.*;
 import org.rowland.jinix.nio.JinixPath;
 import org.rowland.jinix.proc.ProcessManager;
+import org.rowland.jinix.terminal.TermServer;
 
 import javax.naming.Context;
 import java.io.*;
@@ -27,10 +29,9 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.RMISocketFactory;
 import java.security.Policy;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.Properties;
+import java.util.*;
 import java.util.logging.*;
+import java.util.logging.Formatter;
 
 /**
  * ExecLauncher bootstraps every Jinix executable started by the ExecServer. The ExecLauncher calls back to the
@@ -41,10 +42,11 @@ import java.util.logging.*;
  */
 public class ExecLauncher {
 
-    private static int pid;
+    private static int pid, pgid;
     private static NameSpace rootNameSpace;
     private static ExecServer es;
     private static ProcessManager pm;
+    private static TermServer ts;
     private static JinixFileDescriptor stdIn;
     private static JinixFileDescriptor stdOut;
     private static JinixFileDescriptor stdErr;
@@ -61,8 +63,11 @@ public class ExecLauncher {
     private static String execCmd;
     private static String[] execArgs;
     private static ProcessSignalHandler signalHandler;
+    private static List<Thread> runtimeThreads;
 
-    public static void launch(int pid) {
+    private static ProcessManager.ProcessState state;
+
+    public static void launch(int pid, int pgid) {
 
         try {
             Runtime.getRuntime().addShutdownHook(new ExecLauncherShutdownThread());
@@ -70,6 +75,9 @@ public class ExecLauncher {
             JinixRuntime.setJinixRuntime(new JinixRuntimeImpl());
 
             ExecLauncher.pid = pid;
+            ExecLauncher.pgid = pgid;
+
+            runtimeThreads = new LinkedList<>();
 
             ExecLauncherData execLaunchData = es.execLauncherCallback(pid);
 
@@ -158,24 +166,34 @@ public class ExecLauncher {
                     throw new NoSuchMethodException("main");
                 }
 
-                Thread execThread = new Thread(execThreadGroup, new ExecThreadRunnable(m, execArgs));
-                execThread.setContextClassLoader(execCL);
-
+                // The Jinix security realm is not in effect. All access to resources beyond this point is through Jinix
                 Policy.setPolicy(new JinixPolicy());
                 System.setSecurityManager(new SecurityManager());
 
+                Thread.setJinixThread();
+
+                Thread execThread = new Thread(execThreadGroup, new ExecThreadRunnable(m, execArgs));
+                execThread.setContextClassLoader(execCL);
+
+                /*
+                try {
+                    Thread.class.getDeclaredMethod("setJinixThread").invoke(null);
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                } catch (InvocationTargetException e) {
+                    throw new RuntimeException(e);
+                }
+                */
+
                 execThread.start();
 
-
             } catch (ClassNotFoundException e) {
-                throw new RuntimeException("Invalid jinix executable", e);
+                throw new RuntimeException("Invalid jinix executable. Main class not found: "+execClassName);
             } catch (NoSuchMethodException e) {
-                throw new RuntimeException("Invalid jinix executable", e);
+                throw new RuntimeException("Invalid jinix executable. No main() method");
             }
 
         } catch (RemoteException e) {
-            throw new RuntimeException(e);
-        } catch (FileNotFoundException e) {
             throw new RuntimeException(e);
         }
     }
@@ -329,7 +347,40 @@ public class ExecLauncher {
         return translatorNodePath;
     }
 
+    private static void suspend() throws RemoteException{
+
+        if (state != ProcessManager.ProcessState.RUNNING) {
+            return;
+        }
+
+        for (Thread t : runtimeThreads) {
+            t.suspend();
+        }
+        state = ProcessManager.ProcessState.SUSPENDED;
+        pm.updateProcessState(pid, state);
+    }
+
+    private static void resume() throws RemoteException {
+
+        if (state != ProcessManager.ProcessState.SUSPENDED) {
+            return;
+        }
+        for (Thread t : runtimeThreads) {
+            t.resume();
+        }
+
+        // Release any terminal operations that were blocked when the process was suspended
+        //synchronized (JinixFileDescriptor.blockedTerminalOperationSynchronizationObject) {
+        //    JinixFileDescriptor.blockedTerminalOperationSynchronizationObject.notifyAll();
+        //}
+
+        state = ProcessManager.ProcessState.RUNNING;
+        pm.updateProcessState(pid, state);
+    }
+
     public static void main(String[] args) {
+
+        state = ProcessManager.ProcessState.STARTING;
 
         if (args.length < 2) {
             throw new IllegalArgumentException("Insufficient arguments provided.");
@@ -339,12 +390,19 @@ public class ExecLauncher {
         try {
             pid = Integer.valueOf(args[0]);
         } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("First parameter must be a valid integer: " + args[0]);
+            throw new IllegalArgumentException("First parameter (PID) must be a valid integer: " + args[0]);
         }
 
-        String rmiModeStr = args[1];
+        int pgid;
+        try {
+            pgid = Integer.valueOf(args[1]);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Second parameter (PGID) must be a valid integer: " + args[1]);
+        }
+
+        String rmiModeStr = args[2];
         if (rmiModeStr == null || !rmiModeStr.startsWith("rmi=")) {
-            throw new IllegalArgumentException("Second parameter must indicate rmi mode: " + args[1]);
+            throw new IllegalArgumentException("Third parameter must indicate rmi mode: " + args[2]);
         }
 
         rmiModeStr = rmiModeStr.substring("rmi=".length());
@@ -359,7 +417,7 @@ public class ExecLauncher {
                 es = (ExecServer) (rootNameSpace.lookup(ExecServer.SERVER_NAME)).remote;
                 pm = (ProcessManager) rootNameSpace.lookup(ProcessManager.SERVER_NAME).remote;
             } catch (NotBoundException e) {
-                System.err.println("ProcessManager: Failed to locate root NameSpace in RMI Registry");
+                System.err.println("ExecLauncher: Failed to locate root NameSpace in RMI Registry");
                 return;
             }
         } catch (RemoteException e) {
@@ -368,28 +426,65 @@ public class ExecLauncher {
             return;
         }
 
-        launch(pid);
+        launch(pid, pgid);
+
+        try {
+            state = ProcessManager.ProcessState.RUNNING;
+            pm.updateProcessState(pid, state);
+        } catch (RemoteException e) {
+            // ignore as the state updated can be skipped
+        }
 
         try {
             while (true) {
                 ProcessManager.Signal signal = pm.listenForSignal(pid);
-
                 if (signal == null) {
-                    // Should never happen, means the pid is not registered with the process manager. We just exit.
+                    // Should only happen when the process is terminating. ProcessManager.deRegisterProcess() will wake
+                    // out waiting thread, and it will return null;
                     System.exit(0);
                 }
 
-                if (signal == ProcessManager.Signal.ABORT || signal == ProcessManager.Signal.KILL) {
-                    System.exit(0);
-                } else if (signal == ProcessManager.Signal.HANGUP) {
-                    // TODO: give the process an opportunity to handle this signal. If not handler, just exit
-                    System.exit(0);
-                } else if (signal == ProcessManager.Signal.TERMINATE) {
-                    if (signalHandler != null) {
-                        signalHandler.handleSignal(signal);
-                    } else {
+                switch (signal) {
+                    case ABORT:
+                    case KILL:
                         System.exit(0);
-                    }
+                        break;
+                    case HANGUP:
+                        if (signalHandler == null || !signalHandler.handleSignal(signal)) {
+                            System.exit(0);
+                        }
+                        break;
+                    case TERMINATE:
+                        if (signalHandler == null || !signalHandler.handleSignal(signal)) {
+                            System.exit(0);
+                        }
+                        break;
+                    case STOP:
+                        suspend();
+                        break;
+                    case TSTOP:
+                        if (signalHandler == null || !signalHandler.handleSignal(signal)) {
+                            suspend();
+                        }
+                        break;
+                    case CONTINUE:
+                        resume();
+                        break;
+                    case CHILD:
+                        if (signalHandler != null) {
+                            signalHandler.handleSignal(signal);
+                        }
+                        break;
+                    case TERMINAL_INPUT:
+                        if (signalHandler == null || !signalHandler.handleSignal(signal)) {
+                            suspend();
+                        }
+                        break;
+                    case TERMINAL_OUTPUT:
+                        if (signalHandler == null || !signalHandler.handleSignal(signal)) {
+                            suspend();
+                        }
+                        break;
                 }
             }
         } catch (RemoteException e) {
@@ -401,6 +496,14 @@ public class ExecLauncher {
 
         @Override
         public void run() {
+
+            try {
+                state = ProcessManager.ProcessState.STOPPING;
+                pm.updateProcessState(pid, state);
+            } catch (RemoteException e) {
+                // Ignore as the state update can be skipped
+            }
+
             if (ExecLauncher.translatorNode != null) {
                 ExecLauncher.translatorNode.close();
             } else {
@@ -408,7 +511,7 @@ public class ExecLauncher {
                 ExecLauncher.stdOut.close();
                 ExecLauncher.stdErr.close();
             }
-            FileChannel lastFC = null;
+            RemoteFileAccessor lastFC = null;
             int retryCount = 0;
             while (!JinixFileDescriptor.openFileDescriptors.isEmpty()) {
                 JinixFileDescriptor fd = JinixFileDescriptor.openFileDescriptors.get(0);
@@ -422,6 +525,13 @@ public class ExecLauncher {
                     lastFC = fd.getHandle();
                 }
                 fd.close();
+            }
+
+            try {
+                state = ProcessManager.ProcessState.SHUTDOWN;
+                pm.deRegisterProcess(pid);
+            } catch (RemoteException e) {
+                // Ignore as the state update can be skipped
             }
         }
     }
@@ -490,11 +600,11 @@ public class ExecLauncher {
         @Override
         public int exec(String cmd, String[] args) throws FileNotFoundException, InvalidExecutableException {
 
-            return exec(JinixSystem.getJinixProperties(), cmd, args, null, null, null);
+            return exec(JinixSystem.getJinixProperties(), cmd, args, 0, null, null, null);
         }
 
         @Override
-        public int exec(Properties environment, String cmd, String[] args,
+        public int exec(Properties environment, String cmd, String[] args, int processGroupId,
                         JinixFileDescriptor stdin, JinixFileDescriptor stdout, JinixFileDescriptor stderr)
             throws FileNotFoundException, InvalidExecutableException {
             try {
@@ -510,7 +620,7 @@ public class ExecLauncher {
                 stdout.getHandle().duplicate();
                 stderr.getHandle().duplicate();
 
-                return es.exec(environment, cmd, args, ExecLauncher.pid,
+                return es.exec(environment, cmd, args, ExecLauncher.pid, processGroupId,
                         stdin.getHandle(), stdout.getHandle(), stderr.getHandle());
             } catch (RemoteException e) {
                 throw new RuntimeException(e);
@@ -521,7 +631,7 @@ public class ExecLauncher {
         public int fork() throws FileNotFoundException, InvalidExecutableException {
             JinixSystem.setJinixProperty(JINIX_FORK, Integer.toString(pid));
             Properties environ = JinixSystem.getJinixProperties();
-            return exec(environ, execCmd, execArgs, null, null, null);
+            return exec(environ, execCmd, execArgs, 0, null, null, null);
         }
 
         @Override
@@ -541,9 +651,23 @@ public class ExecLauncher {
         }
 
         @Override
-        public int waitForChild() {
+        public int getProcessGroupId() {
+            return pgid;
+        }
+
+        @Override
+        public int getProcessSessionId() {
             try {
-                return pm.waitForChild(ExecLauncher.pid);
+                return pm.getProcessSessionId(pid);
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public ProcessManager.ChildEvent waitForChild(boolean nowait) {
+            try {
+                return pm.waitForChild(ExecLauncher.pid, nowait);
             } catch (RemoteException e) {
                 throw new RuntimeException(e);
             }
@@ -563,6 +687,15 @@ public class ExecLauncher {
         public void sendSignal(int pid, ProcessManager.Signal signal) {
             try {
                 pm.sendSignal(pid, signal);
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public void sendSignalProcessGroup(int processGroupId, ProcessManager.Signal signal) {
+            try {
+                pm.sendSignalProcessGroup(processGroupId, signal);
             } catch (RemoteException e) {
                 throw new RuntimeException(e);
             }
@@ -590,6 +723,56 @@ public class ExecLauncher {
         public void bindTranslator(Remote translator) {
             try {
                 rootNameSpace.bind(translatorNodePath, translator);
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public synchronized void registerJinixThread(Thread t) {
+            if (!runtimeThreads.contains(t)) {
+                runtimeThreads.add(t);
+            }
+        }
+
+        @Override
+        public void setProcessGroupId(int processGroupId) {
+            try {
+                pgid = pm.setProcessGroupId(pid, processGroupId);
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public void setProcessSessionId() {
+            try {
+                pgid = pm.setProcessSessionId(pid);
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public void setProcessTerminalId(short terminalId) {
+            try {
+                pm.setProcessTerminalId(pid, terminalId);
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public void setForegroundProcessGroupId(int processGroupId) {
+            try {
+                ts = (TermServer) rootNameSpace.lookup(TermServer.SERVER_NAME).remote;
+                short terminalId = pm.getProcessTerminalId(pid);
+                if (terminalId == -1) {
+                    //Deamon processes and translators don't have terminals so they cannot call this method.
+                    //TODO throw an exception.
+                    return;
+                }
+                ts.setTerminalForegroundProcessGroup(terminalId, processGroupId);
             } catch (RemoteException e) {
                 throw new RuntimeException(e);
             }

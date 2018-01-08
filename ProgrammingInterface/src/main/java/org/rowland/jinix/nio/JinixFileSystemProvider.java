@@ -1,9 +1,11 @@
 package org.rowland.jinix.nio;
 
+import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixNativeAccessPermission;
 import org.rowland.jinix.lang.JinixRuntime;
 import org.rowland.jinix.naming.FileNameSpace;
 import org.rowland.jinix.naming.LookupResult;
+import org.rowland.jinix.naming.RemoteFileAccessor;
 
 import java.io.IOException;
 import java.net.URI;
@@ -24,6 +26,34 @@ public class JinixFileSystemProvider extends FileSystemProvider {
 
     FileSystemProvider defaultFileSystemProvider; // this field can be null
     JinixFileSystem jinixFileSystem;
+
+    /**
+     * Represents the flags from a user-supplied set of open options.
+     */
+    private static class Flags {
+        boolean read;
+        boolean write;
+        boolean append;
+
+        static Flags toFlags(Set<? extends OpenOption> options) {
+            Flags flags = new Flags();
+            for (OpenOption option: options) {
+                if (option instanceof StandardOpenOption) {
+                    switch ((StandardOpenOption)option) {
+                        case READ : flags.read = true; break;
+                        case WRITE : flags.write = true; break;
+                        case APPEND : flags.append = true; break;
+                        default: throw new UnsupportedOperationException();
+                    }
+                    continue;
+                }
+                if (option == null)
+                    throw new NullPointerException();
+                throw new UnsupportedOperationException();
+            }
+            return flags;
+        }
+    }
 
     /**
      * This contructor is called by FileSystems.getDefaultProvider() to create
@@ -101,14 +131,34 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     @Override
     public FileChannel newFileChannel(Path path, Set<? extends OpenOption> options, FileAttribute<?>[] attrs) throws IOException {
         if (defaultFileSystemProvider == null) {
-            return new JinixFileChannel(path, options, attrs);
+
+            // default is reading; append => writing
+            if (!options.contains(StandardOpenOption.READ) && !options.contains(StandardOpenOption.WRITE)) {
+                if (options.contains(StandardOpenOption.APPEND)) {
+                    options = EnumSet.of(StandardOpenOption.WRITE, StandardOpenOption.APPEND);
+                } else {
+                    options = EnumSet.of(StandardOpenOption.READ);
+                }
+            }
+
+            JinixFileDescriptor fd = new JinixFileDescriptor(open(path, options));
+            return JinixFileChannel.open(fd, options, null);
         }
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
             try {
                 securityManager.checkPermission(new JinixNativeAccessPermission());
             } catch (AccessControlException e) {
-                return new JinixFileChannel(path, options, attrs);
+                // default is reading; append => writing
+                if (!options.contains(StandardOpenOption.READ) && !options.contains(StandardOpenOption.WRITE)) {
+                    if (options.contains(StandardOpenOption.APPEND)) {
+                        options = EnumSet.of(StandardOpenOption.WRITE, StandardOpenOption.APPEND);
+                    } else {
+                        options = EnumSet.of(StandardOpenOption.READ);
+                    }
+                }
+                JinixFileDescriptor fd = new JinixFileDescriptor(open(path, options));
+                return JinixFileChannel.open(fd, options, null);
             }
         }
 
@@ -402,10 +452,13 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     private void checkAccessInternal(Path path, AccessMode... modes) throws IOException {
         LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
                 path.toAbsolutePath().toString());
-        FileNameSpace fns = (FileNameSpace) lookup.remote;
-        if (!fns.exists(lookup.remainingPath))
-        {
-            throw new NoSuchFileException(path.toString());
+        if (lookup.remote instanceof FileNameSpace) {
+            FileNameSpace fns = (FileNameSpace) lookup.remote;
+            if (!fns.exists(lookup.remainingPath)) {
+                throw new NoSuchFileException(path.toString());
+            }
+        } else {
+            throw new AccessDeniedException(path.toString());
         }
     }
 
@@ -491,5 +544,19 @@ public class JinixFileSystemProvider extends FileSystemProvider {
         }
 
         defaultFileSystemProvider.setAttribute(path, attribute, value, options);
+    }
+
+    private RemoteFileAccessor open(Path path, Set<? extends OpenOption> options)
+            throws IOException {
+        try {
+            int pid = JinixRuntime.getRuntime().getPid();
+            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
+                    path.toAbsolutePath().toString());
+            FileNameSpace fns = (FileNameSpace) lookup.remote;
+            // Throws FileAlreadyExistsException with CREATE_NEW option
+            return fns.getRemoteFileAccessor(pid, lookup.remainingPath, options);
+        } catch (RemoteException e) {
+            throw new IOException("IOException creating file channel", e.getCause());
+        }
     }
 }

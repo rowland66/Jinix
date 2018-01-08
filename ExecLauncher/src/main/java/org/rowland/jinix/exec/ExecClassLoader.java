@@ -70,7 +70,10 @@ public class ExecClassLoader extends URLClassLoader {
         URL u = new URL("jar", "", jarURL + "!/");
         JarURLConnection uc = (JarURLConnection)u.openConnection();
         Attributes attr = uc.getMainAttributes();
-        String classPath = attr.getValue(Attributes.Name.CLASS_PATH);
+        String classPath = null;
+        if (attr != null) {
+            classPath = attr.getValue(Attributes.Name.CLASS_PATH);
+        }
         if (classPath == null) {
             return new String[0];
         }

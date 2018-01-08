@@ -1,13 +1,22 @@
 package org.rowland.jinix;
 
+import jdk.nashorn.internal.lookup.Lookup;
 import org.rowland.jinix.exec.ExecServer;
+import org.rowland.jinix.exec.InvalidExecutableException;
 import org.rowland.jinix.logger.LogServer;
 import org.rowland.jinix.naming.FileNameSpace;
+import org.rowland.jinix.naming.LookupResult;
+import org.rowland.jinix.naming.NameSpace;
+import org.rowland.jinix.naming.RemoteFileAccessor;
 import org.rowland.jinix.proc.ProcessManager;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.StandardOpenOption;
 import java.rmi.ConnectException;
 import java.rmi.NoSuchObjectException;
 import java.rmi.NotBoundException;
@@ -16,13 +25,14 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.RMISocketFactory;
 import java.rmi.server.UnicastRemoteObject;
+import java.util.EnumSet;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogManager;
 import java.util.logging.Logger;
 
 /**
- * The three core server that constitute the Jinix kernel. The server are NameSpace, ProcessManager
+ * The three core server that constitute the Jinix kernel. The servers are NameSpace, ProcessManager
  * and Exec. These servers are started together since nothing can happen without them. Other
  * Jinix servers are implemented as translators.
  */
@@ -73,7 +83,7 @@ public class JinixKernel {
 
             logger.info("LogServer: Started and bound to root namespace at " + LogServer.SERVER_NAME);
 
-            pm = new ProcessManagerServer();
+            pm = new ProcessManagerServer(fs);
             fs.bind(ProcessManager.SERVER_NAME, pm);
 
             logger.info("ProcessManager: Started and bound to root namespace at " + ProcessManager.SERVER_NAME);
@@ -98,6 +108,41 @@ public class JinixKernel {
             }));
 
             mainThread = Thread.currentThread();
+
+            RemoteFileAccessor raf = null;
+
+            try {
+                EnumSet<StandardOpenOption> openOptions = EnumSet.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+                NameSpace remoteRootNameSpace = (NameSpace) getRegistry().lookup("root");
+                LookupResult lookup = remoteRootNameSpace.lookup("/var/log/init.log");
+                FileNameSpace fns = (FileNameSpace) lookup.remote;
+                raf = fns.getRemoteFileAccessor(-1, lookup.remainingPath, openOptions);
+            } catch (FileAlreadyExistsException e) {
+                // Should never happen as we are not using CREATE_NEW
+            } catch (NoSuchFileException e) {
+                // Should never happen as we are using CREATE
+            } catch (NotBoundException e) {
+                System.err.println("Kernel: Failed to find root namespace in RMI registry.");
+                System.exit(0);
+            }
+
+            try {
+                int initPid = es.exec(null, "/sbin/init.jar", new String[] {}, 0, -1, raf, raf, raf);
+            } catch (FileNotFoundException e) {
+                System.err.println("Init executable not found at /sbin/init.jar");
+                if (raf != null) {
+                    raf.close();
+                }
+                System.exit(0);
+            } catch (InvalidExecutableException e) {
+                System.err.println("Invalid executable at /sbin/init.jar");
+                if (raf != null) {
+                    raf.close();
+                }
+                System.exit(0);
+            }
+
+            // No need to close raf since we pass it to init.
 
             try {
                 Thread.sleep(Integer.MAX_VALUE);
@@ -137,6 +182,16 @@ public class JinixKernel {
         }
     }
 
+    private static Registry getRegistry() throws RemoteException {
+        if (RMISocketFactory.getSocketFactory() != null &&
+                RMISocketFactory.getSocketFactory().getClass().getName().
+                        equals("org.newsclub.net.unix.rmi.AFUNIXRMISocketFactory")) {
+            return LocateRegistry.getRegistry("JinixKernel", 100001, RMISocketFactory.getSocketFactory());
+        } else {
+            return LocateRegistry.getRegistry(Registry.REGISTRY_PORT);
+        }
+    }
+
     private static void setupLogging(String[] args) {
 
         Logger rootLogger = LogManager.getLogManager().getLogger("");
@@ -146,7 +201,7 @@ public class JinixKernel {
             if (args[i].equals("-i") || args[i].equals("--interactive")) {
                 rootLogger.getHandlers()[0].setFormatter(new BriefKernelLogFormatter());
                 consoleLogging = true;
-                return; // Leave the defaule ConsoleHandler in place and log to the console
+                return; // Leave the default ConsoleHandler in place and log to the console
             }
         }
 

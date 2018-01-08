@@ -4,20 +4,18 @@ import org.rowland.jinix.exec.ExecServer;
 import org.rowland.jinix.exec.InvalidExecutableException;
 import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixFileOutputStream;
-import org.rowland.jinix.naming.FileChannel;
-import org.rowland.jinix.naming.FileNameSpace;
 import org.rowland.jinix.io.JinixFileInputStream;
+import org.rowland.jinix.lang.JinixRuntime;
 import org.rowland.jinix.naming.NameSpace;
+import org.rowland.jinix.proc.ProcessManager;
 import org.rowland.jinix.terminal.TermServer;
 
 import java.io.*;
 import java.rmi.NotBoundException;
-import java.rmi.Remote;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.RMISocketFactory;
-import java.util.HashMap;
 
 /**
  * A simple Console for Jinix. The Console access the TerminalServer to create a terminal, and then accesses
@@ -30,6 +28,7 @@ public class Console {
     public static void main(String[] args) {
 
         try {
+            JinixRuntime.setJinixRuntime(new ConsoleFakeJinixRuntime());
             setupRMI(args);
             Registry registry = getRegistry();
             NameSpace fs = (NameSpace) registry.lookup("root");
@@ -42,13 +41,20 @@ public class Console {
 
             ExecServer es = (ExecServer) fs.lookup(ExecServer.SERVER_NAME).remote;
 
+            ProcessManager pm = (ProcessManager) fs.lookup(ProcessManager.SERVER_NAME).remote;
+
             //"-Xdebug","-Xrunjdwp:transport=dt_socket,address=5555,server=y,suspend=y",
             try {
-                slaveFileDescriptor.getHandle().duplicate(); // We need to dup the slave FileChannel twice because we are
+                slaveFileDescriptor.getHandle().duplicate(); // We need to dup the slave RemoteFileAccessor twice because we are
                 slaveFileDescriptor.getHandle().duplicate(); // passing 3 slave FileChannels, and ExecLauncher will close all three
-                int pid = es.exec(null, "/bin/jsh.jar", new String[]{"/home"}, 0,
+
+                int pid = es.exec(null, "/bin/jsh.jar", new String[]{"/home"}, 0, -1,
                         slaveFileDescriptor.getHandle(), slaveFileDescriptor.getHandle(), slaveFileDescriptor.getHandle());
+
+                pm.setProcessTerminalId(pid, terminalId);
+
                 t.linkProcessToTerminal(terminalId, pid);
+                t.setTerminalForegroundProcessGroup(terminalId, pid);
             } catch (FileNotFoundException | InvalidExecutableException e) {
                 throw new RuntimeException(e);
             }
@@ -56,18 +62,14 @@ public class Console {
             // This is confusing. The inputstream is the output from the exec'd process, and the output stream
             // is the input.
             OutputThread outputThread = null;
-            try {
-                InputStream is = new BufferedInputStream(new JinixFileInputStream(masterFileDescriptor));
-                OutputStream os = new JinixFileOutputStream(masterFileDescriptor);
+            InputStream is = new BufferedInputStream(new JinixFileInputStream(masterFileDescriptor));
+            OutputStream os = new JinixFileOutputStream(masterFileDescriptor);
 
-                outputThread = new OutputThread(is);
-                InputThread inputThread = new InputThread(os);
+            outputThread = new OutputThread(is);
+            InputThread inputThread = new InputThread(os);
 
-                outputThread.start();
-                inputThread.start();
-            } catch (FileNotFoundException e) {
-                throw new RuntimeException(e);
-            }
+            outputThread.start();
+            inputThread.start();
 
             try {
                 outputThread.join();

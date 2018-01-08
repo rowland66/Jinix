@@ -4,6 +4,8 @@ import java.net.URI;
 import java.nio.file.*;
 import java.rmi.Remote;
 import java.rmi.RemoteException;
+import java.util.List;
+import java.util.Set;
 
 /**
  * Primary interface for a Jinix file system.
@@ -44,7 +46,9 @@ public interface FileNameSpace extends Remote {
     void move(String nameFrom, String pathNameTo, CopyOption... options)
             throws NoSuchFileException, FileAlreadyExistsException, UnsupportedOperationException, RemoteException;
 
-    FileChannel getFileChannel(String name, OpenOption... options) throws FileAlreadyExistsException, NoSuchFileException, RemoteException;
+    RemoteFileAccessor getRemoteFileAccessor(int pid, String name, Set<? extends OpenOption> options) throws FileAlreadyExistsException, NoSuchFileException, RemoteException;
 
     Object getKey(String name) throws RemoteException;
+
+    List<FileAccessorStatistics> getOpenFiles(int pid) throws RemoteException;
 }
