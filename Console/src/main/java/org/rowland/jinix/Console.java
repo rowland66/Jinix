@@ -8,7 +8,9 @@ import org.rowland.jinix.io.JinixFileInputStream;
 import org.rowland.jinix.lang.JinixRuntime;
 import org.rowland.jinix.naming.NameSpace;
 import org.rowland.jinix.proc.ProcessManager;
+import org.rowland.jinix.terminal.LocalMode;
 import org.rowland.jinix.terminal.TermServer;
+import org.rowland.jinix.terminal.TerminalAttributes;
 
 import java.io.*;
 import java.rmi.NotBoundException;
@@ -48,12 +50,17 @@ public class Console {
                 slaveFileDescriptor.getHandle().duplicate(); // We need to dup the slave RemoteFileAccessor twice because we are
                 slaveFileDescriptor.getHandle().duplicate(); // passing 3 slave FileChannels, and ExecLauncher will close all three
 
-                int pid = es.exec(null, "/bin/jsh.jar", new String[]{"/home"}, 0, -1,
+                int pid = es.exec(null, "/bin/jsh.jar", new String[]{"/home"}, 1, -1,
                         slaveFileDescriptor.getHandle(), slaveFileDescriptor.getHandle(), slaveFileDescriptor.getHandle());
 
                 pm.setProcessTerminalId(pid, terminalId);
 
                 t.linkProcessToTerminal(terminalId, pid);
+
+                TerminalAttributes terminalAttributes = t.getTerminalAttributes(terminalId);
+                terminalAttributes.localModes.remove(LocalMode.ECHO);
+                t.setTerminalAttributes(terminalId, terminalAttributes);
+
                 t.setTerminalForegroundProcessGroup(terminalId, pid);
             } catch (FileNotFoundException | InvalidExecutableException e) {
                 throw new RuntimeException(e);
@@ -80,6 +87,13 @@ public class Console {
             // Java no longer supports interuptable blocking I/O. (It was only supported on Solaris anyway)
             // Interrupting the inputThread does not work, so we just need to exit().
             //inputThread.interrupt();
+
+            try {
+                is.close();
+                os.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
 
             System.exit(0);
 

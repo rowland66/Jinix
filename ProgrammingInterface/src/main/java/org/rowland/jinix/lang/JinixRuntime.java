@@ -7,6 +7,7 @@ import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixPipe;
 import org.rowland.jinix.naming.NameSpace;
 import org.rowland.jinix.proc.ProcessManager;
+import org.rowland.jinix.terminal.TerminalAttributes;
 
 import javax.naming.Context;
 import java.io.FileNotFoundException;
@@ -26,6 +27,8 @@ public abstract class JinixRuntime {
     public static final String JINIX_LIBRARY_PATH = "jinix.library.path";
     public static final String JINIX_PATH_EXT = "jinix.path.ext";
     public static final String JINIX_FORK = "jinix.fork";
+
+    public enum StandardFileDescriptor {IN, OUT, ERROR};
 
     private static JinixRuntime jinixRuntimeSingleton = null;
 
@@ -115,6 +118,21 @@ public abstract class JinixRuntime {
     public abstract int fork() throws FileNotFoundException, InvalidExecutableException;
 
     /**
+     * Execute the current Jinix executable image in a new process. This is not a true fork as
+     * the memory address space will not be replicated. The JinixRuntime.isForkChild() method
+     * will return true in the child process. The JinixFileDescriptor parameters are generally
+     * obtained from a call to pipe(). This allows the parent to communication with its child.
+     *
+     * @param in
+     * @param out
+     * @param error
+     * @return
+     * @throws FileNotFoundException
+     * @throws InvalidExecutableException
+     */
+    public abstract int fork(JinixFileDescriptor in, JinixFileDescriptor out, JinixFileDescriptor error) throws FileNotFoundException, InvalidExecutableException;
+
+    /**
      * Was the current process started as a fork of a parent process. This method will only
      * return true once for any process. Once it is called, any subsequent calls return false.
      *
@@ -153,6 +171,14 @@ public abstract class JinixRuntime {
      * @return the pid of the child process that triggered the return, or -1 if no child processes exist
      */
     public abstract ProcessManager.ChildEvent waitForChild(boolean nowait);
+
+    /**
+     * Get a Jinix file descriptor for one of the standard process files (IN, OUT and ERROR).
+     *
+     * @param sfd
+     * @return
+     */
+    public abstract JinixFileDescriptor getStandardFileDescriptor(StandardFileDescriptor sfd);
 
     /**
      * Create a JinixPipe that can be used to transfer data between two processes.
@@ -226,6 +252,31 @@ public abstract class JinixRuntime {
      */
     public abstract void setProcessTerminalId(short terminalId);
 
+    /**
+     * Get the terminal ID for the Jinix process.
+     *
+     * @return the terminal ID
+     */
+    public abstract short getProcessTerminalId();
 
     public abstract void setForegroundProcessGroupId(int processGroupId);
+
+    /**
+     * Get the terminal attributes for a terminal. The terminal attributes control how the terminal line discipline
+     * processes characters sent and received by the terminal device.
+     *
+     * @param terminalId id of the terminal
+     * @return a TerminalAttributes object. The TerminalAtributes class is modeled after the unix termios strcture.
+     */
+    public abstract TerminalAttributes getTerminalAttributes(short terminalId);
+
+    /**
+     * Set the terminal attributes for a terminal.
+     *
+     * @param terminalId
+     * @param terminalAttributes
+     */
+    public abstract void setTerminalAttributes(short terminalId, TerminalAttributes terminalAttributes);
+
+    public abstract void exit(int status);
 }

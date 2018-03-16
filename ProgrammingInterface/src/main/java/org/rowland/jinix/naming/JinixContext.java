@@ -1,8 +1,14 @@
 package org.rowland.jinix.naming;
 
+import org.rowland.jinix.lang.JinixRuntime;
+
 import javax.naming.*;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.StandardOpenOption;
 import java.rmi.Remote;
 import java.rmi.RemoteException;
+import java.util.EnumSet;
 import java.util.Hashtable;
 
 /**
@@ -11,6 +17,10 @@ import java.util.Hashtable;
 public class JinixContext implements Context {
 
     NameSpace root;
+
+    public JinixContext() {
+        root = JinixRuntime.getRuntime().getRootNamespace();
+    }
 
     public JinixContext(NameSpace rootNameSpace) {
         root = rootNameSpace;
@@ -23,8 +33,22 @@ public class JinixContext implements Context {
 
     @Override
     public Object lookup(String name) throws NamingException {
+        if (!name.startsWith("/")) {
+            name = "/"+name;
+        }
         try {
-            return root.lookup(name).remote;
+            LookupResult lookup = root.lookup(name);
+            if (lookup.remote instanceof FileNameSpace && !lookup.remainingPath.equals("/")) {
+                FileNameSpace fns = (FileNameSpace) lookup.remote;
+                if (!fns.exists(lookup.remainingPath)) {
+                    throw new NameNotFoundException("No object bound at: " + name);
+                }
+                return fns.getRemoteFileAccessor(JinixRuntime.getRuntime().getPid(), lookup.remainingPath, EnumSet.noneOf(StandardOpenOption.class));
+            } else {
+                return lookup.remote;
+            }
+        } catch (FileAlreadyExistsException | NoSuchFileException e) {
+            throw new RuntimeException("Internal error: ", e); // This should never happen
         } catch (RemoteException e) {
             throw new RuntimeException(e);
         }

@@ -115,6 +115,11 @@ public class JinixFileOutputStream extends OutputStream {
     }
 
     @Override
+    public void flush() throws IOException {
+        fd.getHandle().flush();
+    }
+
+    @Override
     public void close() throws IOException {
         fd.close();
     }

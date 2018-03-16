@@ -27,7 +27,7 @@ public class JinixFile {
         if (pathname == null) {
             this.path = "";
         }
-        this.path = normalize(pathname);
+        this.path = pathname;
     }
 
     public JinixFile(String parent, String child) {
@@ -38,12 +38,12 @@ public class JinixFile {
         String path;
         if (parent != null) {
             if (parent.equals("")) {
-                path = normalize(child);
+                path = child;
             } else {
-                path = resolve(normalize(parent), normalize(child));
+                path = resolve(parent, child);
             }
         } else {
-            path = normalize(child);
+            path = child;
         }
 
         this.path = path;
@@ -86,12 +86,12 @@ public class JinixFile {
         String path;
         if (parent != null) {
             if (parent.path.equals("")) {
-                path = normalize(child);
+                path = child;
             } else {
-                path = resolve(parent.path, normalize(child));
+                path = resolve(parent.path, child);
             }
         } else {
-            path = normalize(child);
+            path = child;
         }
 
         this.path = path;
@@ -250,7 +250,7 @@ public class JinixFile {
         }
     }
 
-    public void setLastModified(long time) {
+    public boolean setLastModified(long time) {
         try {
             if (!exists()) {
                 throw new RuntimeException("Failure setting lastModified");
@@ -260,8 +260,9 @@ public class JinixFile {
             LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             fns.setFileAttributes(lookup.remainingPath, dfd);
+            return true;
         } catch (NoSuchFileException e) {
-            return;
+            return false;
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

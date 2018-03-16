@@ -6,7 +6,7 @@ import java.net.URLConnection;
 import java.net.URLStreamHandler;
 
 /**
- * Created by rsmith on 11/26/2016.
+ * A java.net.URLStreamHandler that support the "jns" protocol. This protocol is used for locating resources in a Jar file.
  */
 public class JinixFileStreamHandler extends URLStreamHandler {
 

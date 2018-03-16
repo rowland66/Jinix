@@ -1,6 +1,7 @@
 package org.rowland.jinix.exec;
 
 import org.rowland.jinix.IllegalOperationException;
+import org.rowland.jinix.JinixKernelUnicastRemoteObject;
 import org.rowland.jinix.fifo.FifoServer;
 import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixFileInputStream;
@@ -13,6 +14,7 @@ import org.rowland.jinix.naming.*;
 import org.rowland.jinix.nio.JinixPath;
 import org.rowland.jinix.proc.ProcessManager;
 import org.rowland.jinix.terminal.TermServer;
+import org.rowland.jinix.terminal.TerminalAttributes;
 
 import javax.naming.Context;
 import java.io.*;
@@ -55,6 +57,7 @@ public class ExecLauncher {
     private static ThreadGroup execThreadGroup;
     private static boolean nativeAccess = false;
     private static boolean consoleLogging = false;
+    private static ExecClassLoader execCL;
 
     private static InputStream debugStdin;
     private static PrintStream debugStdOut;
@@ -66,6 +69,7 @@ public class ExecLauncher {
     private static List<Thread> runtimeThreads;
 
     private static ProcessManager.ProcessState state;
+    private static int exitStatus = 0;
 
     public static void launch(int pid, int pgid) {
 
@@ -123,35 +127,19 @@ public class ExecLauncher {
 
             URL.setURLStreamHandlerFactory(new ExecStreamHandlerFactory());
 
-            URL execCmdURL;
-            try {
-                execCmdURL = new URL("jns", null, 0, execCmd);
-            } catch (MalformedURLException e) {
-                throw new RuntimeException(e);
-            }
-
-            ExecClassLoader execCL = new ExecClassLoader(execCmdURL, nativeAccess,
+            execCL = new ExecClassLoader(execCmd, nativeAccess,
                     ExecLauncher.class.getClassLoader());
 
             String execClassName;
-            String[] execClassPath;
             try {
                 execClassName = execCL.getMainClassName();
-                execClassPath = execCL.getLibraryNames();
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
 
             if (execClassName == null) {
-                throw new RuntimeException("Invalid executable JAR. Missing Main-Class attribute in manifest.");
-            }
-
-            if (execClassPath != null && execClassPath.length > 0) {
-                URL[] classpathURLs = resolveExecClassPath(execClassPath,
-                        JinixSystem.getJinixProperties().getProperty(JinixRuntime.JINIX_LIBRARY_PATH));
-                for (URL url : classpathURLs) {
-                    execCL.addURL(url);
-                }
+                System.err.println("'"+execCmd+"' is an invalid executable file. Missing manifest or Main-Class attribute in manifest.");
+                System.exit(1);
             }
 
             execThreadGroup = new ThreadGroup("Jinix-Exec");
@@ -172,7 +160,7 @@ public class ExecLauncher {
 
                 Thread.setJinixThread();
 
-                Thread execThread = new Thread(execThreadGroup, new ExecThreadRunnable(m, execArgs));
+                Thread execThread = new Thread(execThreadGroup, new ExecThreadRunnable(m, execArgs), "Jinix Main");
                 execThread.setContextClassLoader(execCL);
 
                 /*
@@ -188,17 +176,22 @@ public class ExecLauncher {
                 execThread.start();
 
             } catch (ClassNotFoundException e) {
-                throw new RuntimeException("Invalid jinix executable. Main class not found: "+execClassName);
+                System.err.println("'"+execCmd+"' is an invalid executable file. Manifest Main-Class not found: "+execClassName);
+                System.exit(1);
             } catch (NoSuchMethodException e) {
-                throw new RuntimeException("Invalid jinix executable. No main() method");
+                System.err.println("'"+execCmd+"' is an invalid executable file. Manifest Main-Class has no main(): "+execClassName);
+                System.exit(1);
             }
 
-        } catch (RemoteException e) {
+        } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
     protected static void setupRMI(String rmiMode) {
+
+        System.setProperty("java.rmi.server.useCodebaseOnly", "false");
+        System.setProperty("java.rmi.server.RMIClassLoaderSpi", "org.rowland.jinix.exec.ExecRMIClassLoader");
 
         if (rmiMode != null) {
             if (rmiMode.equals("AFUNIX")) {
@@ -266,44 +259,6 @@ public class ExecLauncher {
 
     }
 
-    /**
-     * Resolve all of the jar files in the manifest classpath in the library path.
-     *
-     * @param execClassPath
-     * @return an array of URL to fully qualified jar files
-     */
-    private static URL[] resolveExecClassPath(String[] execClassPath, String libraryPathStr) {
-        try {
-            int i=0;
-            URL[] rtrn = new URL[execClassPath.length];
-            if (libraryPathStr == null) {
-                libraryPathStr = "";
-            }
-            String[] libraryPath = libraryPathStr.split(":");
-            for (String jarFile : execClassPath) {
-                for(String libDir : libraryPath) {
-                    String libPathName = libDir + "/" + jarFile;
-                    LookupResult lookup = rootNameSpace.lookup(libPathName);
-                    FileNameSpace fns = (FileNameSpace) lookup.remote;
-                    if (fns.exists(lookup.remainingPath)) {
-                        try {
-                            rtrn[i] = new URL("jns", null, 0, libPathName);
-                        } catch (MalformedURLException e) {
-                            throw new RuntimeException("Invalid library path name: "+libPathName);
-                        }
-                        break;
-                    }
-                }
-                if (rtrn[i] == null) {
-                    throw new RuntimeException("Failed to locate library in library path: "+jarFile);
-                }
-                i++;
-            }
-            return rtrn;
-        } catch (RemoteException e) {
-            throw new RuntimeException(e);
-        }
-    }
 
     /**
      * Translators have no standard input, output or error. Therefore, we need
@@ -317,6 +272,7 @@ public class ExecLauncher {
             // The first and only handler should be the ConsoleHandler.
             rootLogger.getHandlers()[0].setFormatter(
                     new BriefExecLauncherLogFormatter(getTranslatorServerName(translatorNodePath)));
+            rootLogger.getHandlers()[0].setLevel(Level.ALL);
             return;
         }
         //Clear all existing handlers
@@ -440,8 +396,8 @@ public class ExecLauncher {
                 ProcessManager.Signal signal = pm.listenForSignal(pid);
                 if (signal == null) {
                     // Should only happen when the process is terminating. ProcessManager.deRegisterProcess() will wake
-                    // out waiting thread, and it will return null;
-                    System.exit(0);
+                    // up waiting thread, and it will return null;
+                    return;
                 }
 
                 switch (signal) {
@@ -527,9 +483,17 @@ public class ExecLauncher {
                 fd.close();
             }
 
+            if (execCL != null) {
+                execCL.close();
+            }
+
+            if (ExecRMIClassLoader.getJinixProcessInstance() != null) {
+                ExecRMIClassLoader.getJinixProcessInstance().close();
+            }
+
             try {
                 state = ProcessManager.ProcessState.SHUTDOWN;
-                pm.deRegisterProcess(pid);
+                pm.deRegisterProcess(pid, ExecLauncher.exitStatus);
             } catch (RemoteException e) {
                 // Ignore as the state update can be skipped
             }
@@ -561,6 +525,25 @@ public class ExecLauncher {
                     e.printStackTrace(System.err);
                 }
             } finally {
+
+                JinixKernelUnicastRemoteObject.dumpExportedObjects(System.out);
+
+                boolean livingThread = false;
+                do {
+                    livingThread = false;
+                    for (Thread t : runtimeThreads) {
+                        if (t != Thread.currentThread() && !t.isDaemon() && t.isAlive()) {
+                            livingThread = true;
+                            System.out.println("Living thread: "+t.getName());
+                            try {
+                                t.join();
+                            } catch (InterruptedException e) {
+                                // this should never happen
+                            }
+                        }
+                    }
+                } while (livingThread);
+
                 // Since the main ExecLauncher thread is waiting on a signal, send an abort signal.
                 JinixRuntime.getRuntime().sendSignal(pid, ProcessManager.Signal.ABORT);
             }
@@ -585,6 +568,15 @@ public class ExecLauncher {
         }
     }
 
+    static synchronized void getTerminalServer() {
+        if (ts == null) {
+            try {
+                ts = (TermServer) rootNameSpace.lookup(TermServer.SERVER_NAME).remote;
+            } catch (RemoteException e) {
+                System.err.println("Jinix critical error: failed to find terminal server at "+TermServer.SERVER_NAME);
+            }
+        }
+    }
     public static class JinixRuntimeImpl extends JinixRuntime {
 
         @Override
@@ -629,9 +621,14 @@ public class ExecLauncher {
 
         @Override
         public int fork() throws FileNotFoundException, InvalidExecutableException {
+            return fork(null, null, null);
+        }
+
+        @Override
+        public int fork(JinixFileDescriptor in, JinixFileDescriptor out, JinixFileDescriptor error) throws FileNotFoundException, InvalidExecutableException {
             JinixSystem.setJinixProperty(JINIX_FORK, Integer.toString(pid));
             Properties environ = JinixSystem.getJinixProperties();
-            return exec(environ, execCmd, execArgs, 0, null, null, null);
+            return exec(environ, execCmd, execArgs, 0, in, out, error);
         }
 
         @Override
@@ -643,6 +640,19 @@ public class ExecLauncher {
             } else {
                 return false;
             }
+        }
+
+        @Override
+        public JinixFileDescriptor getStandardFileDescriptor(StandardFileDescriptor sfd) {
+            switch (sfd) {
+                case IN:
+                    return stdIn;
+                case OUT:
+                    return stdOut;
+                case ERROR:
+                    return stdErr;
+            }
+            return null; // this cannot happen. Not sure why it is required.
         }
 
         @Override
@@ -754,6 +764,15 @@ public class ExecLauncher {
         }
 
         @Override
+        public short getProcessTerminalId() {
+            try {
+                return pm.getProcessTerminalId(pid);
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
         public void setProcessTerminalId(short terminalId) {
             try {
                 pm.setProcessTerminalId(pid, terminalId);
@@ -765,7 +784,7 @@ public class ExecLauncher {
         @Override
         public void setForegroundProcessGroupId(int processGroupId) {
             try {
-                ts = (TermServer) rootNameSpace.lookup(TermServer.SERVER_NAME).remote;
+                getTerminalServer();
                 short terminalId = pm.getProcessTerminalId(pid);
                 if (terminalId == -1) {
                     //Deamon processes and translators don't have terminals so they cannot call this method.
@@ -777,5 +796,41 @@ public class ExecLauncher {
                 throw new RuntimeException(e);
             }
         }
+
+        @Override
+        public TerminalAttributes getTerminalAttributes(short terminalId) {
+            try {
+                getTerminalServer();
+                return ts.getTerminalAttributes(terminalId);
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public void setTerminalAttributes(short terminalId, TerminalAttributes terminalAttributes) {
+            try {
+                getTerminalServer();
+                ts.setTerminalAttributes(terminalId, terminalAttributes);
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public synchronized void exit(int status) {
+            exitStatus = status;
+            sendSignal(pid, ProcessManager.Signal.ABORT);
+            while (true) {
+                try {
+                    // wait until the abort signal is received and JVM terminates.
+                    wait();
+                } catch (InterruptedException e) {
+                    // We should never be interrupted.
+                }
+            }
+        }
     }
+
+
 }

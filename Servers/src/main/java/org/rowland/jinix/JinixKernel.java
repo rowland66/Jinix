@@ -1,6 +1,7 @@
 package org.rowland.jinix;
 
 import jdk.nashorn.internal.lookup.Lookup;
+import org.rowland.jinix.exec.ExecRMIClassLoader;
 import org.rowland.jinix.exec.ExecServer;
 import org.rowland.jinix.exec.InvalidExecutableException;
 import org.rowland.jinix.logger.LogServer;
@@ -51,10 +52,13 @@ public class JinixKernel {
     private static ExecServerServer es;
     private static boolean shutdown = false;
 
-    private static Logger logger = Logger.getLogger("jinix");
+    private static Logger logger;
 
     public static void main(String[] args) {
         try {
+
+            System.setProperty("java.rmi.server.RMIClassLoaderSpi", "org.rowland.jinix.exec.ExecRMIClassLoader");
+
             setupLogging(args);
 
             setupRMI("JinixKernel", args);
@@ -98,6 +102,18 @@ public class JinixKernel {
 
             logger.info("ExecServer: Started and bound to root namespace at " + ExecServer.SERVER_NAME);
 
+            ExecRMIClassLoader.root = fs;
+
+            /*
+            try {
+                NameSpace remoteRootNameSpace = (NameSpace) getRegistry().lookup("root");
+                ExecRMIClassLoader.root = remoteRootNameSpace;
+            } catch (NotBoundException e) {
+                System.err.println("Kernel: Failed to find root namespace in RMI registry.");
+                System.exit(0);
+            }
+            */
+
             Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
                 @Override
                 public void run() {
@@ -110,7 +126,6 @@ public class JinixKernel {
             mainThread = Thread.currentThread();
 
             RemoteFileAccessor raf = null;
-
             try {
                 EnumSet<StandardOpenOption> openOptions = EnumSet.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
                 NameSpace remoteRootNameSpace = (NameSpace) getRegistry().lookup("root");
@@ -170,6 +185,11 @@ public class JinixKernel {
             registry.unbind("root");
             fs.unexport();
             UnicastRemoteObject.unexportObject(registry, true);
+
+            if (ExecRMIClassLoader.getJinixProcessInstance() != null) {
+                ExecRMIClassLoader.getJinixProcessInstance().close();
+            }
+
             shutdown = true;
             JinixKernelUnicastRemoteObject.dumpExportedObjects(System.out);
             mainThread.interrupt();
@@ -200,7 +220,9 @@ public class JinixKernel {
         for (int i =0; i<args.length; i++) {
             if (args[i].equals("-i") || args[i].equals("--interactive")) {
                 rootLogger.getHandlers()[0].setFormatter(new BriefKernelLogFormatter());
+                rootLogger.getHandlers()[0].setLevel(Level.ALL);
                 consoleLogging = true;
+                logger = Logger.getLogger("jinix");
                 return; // Leave the default ConsoleHandler in place and log to the console
             }
         }
@@ -213,9 +235,13 @@ public class JinixKernel {
 
         Handler memHandler = LogServerServer.kernelLoggingHandler;
         rootLogger.addHandler(memHandler);
+
+        logger = Logger.getLogger("jinix");
     }
 
     protected static void setupRMI(String serverName, String[] args) {
+
+        System.setProperty("java.rmi.server.useCodebaseOnly", "false");
 
         String rmiModeStr = "Default";
         for (int i =0; i<args.length; i++) {

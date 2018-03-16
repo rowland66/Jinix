@@ -4,7 +4,9 @@ import org.rowland.jinix.naming.RemoteFileAccessor;
 
 import java.rmi.Remote;
 import java.rmi.RemoteException;
+import java.util.EnumSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * A server that provides terminals. A terminal has a master and slave that are used move data
@@ -24,11 +26,20 @@ public interface TermServer extends Remote {
 
     /**
      * Create a new terminal with the given encoded terminal options.
-     * @param ttyOptions
+     *
+     * @param inputModes
+     * @param outputModes
+     * @param localModes
+     * @param specialCharacterMap
      * @return
      * @throws RemoteException
      */
-    short createTerminal(Map<PtyMode, Integer> ttyOptions) throws RemoteException;
+    short createTerminal(Set<InputMode> inputModes, Set<OutputMode> outputModes, Set<LocalMode> localModes,
+                         Map<SpecialCharacter, Byte> specialCharacterMap) throws RemoteException;
+
+    TerminalAttributes getTerminalAttributes(short termId) throws RemoteException;
+
+    void setTerminalAttributes(short termId, TerminalAttributes attributes) throws RemoteException;
 
     RemoteFileAccessor getTerminalMaster(short termId) throws RemoteException;
 

@@ -20,5 +20,6 @@
     </orderEntry>
     <orderEntry type="module" module-name="ServerInterfaces" />
     <orderEntry type="module" module-name="ProgrammingInterface" />
+    <orderEntry type="module" module-name="ExecLauncher" />
   </component>
 </module>

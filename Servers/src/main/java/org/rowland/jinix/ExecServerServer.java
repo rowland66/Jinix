@@ -7,15 +7,13 @@ import org.rowland.jinix.naming.*;
 import org.rowland.jinix.proc.ProcessManager;
 import org.rowland.jinix.proc.RegisterResult;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardOpenOption;
 import java.rmi.RemoteException;
 import java.util.*;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import static org.rowland.jinix.JinixKernel.consoleLogging;
@@ -47,7 +45,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
     @Override
     public int execTranslator(String cmd, String[] args, RemoteFileAccessor translatorNode, String translatorNodePath)
             throws FileNotFoundException, InvalidExecutableException, RemoteException {
-        return exec0(null, cmd, args, -1, -1,
+        return exec0(null, cmd, args, 1, -1,
                 null, null, null,
                 translatorNode, translatorNodePath, "file://"+cmd);
     }
@@ -144,6 +142,14 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
         }
         List<String> cmdList = new ArrayList<>(16);
         cmdList.add(javaCmd);
+
+        for (int i=0; i<args.length; i++) {
+            if (args[i].equals("-Xdebug") || args[i].startsWith("-Xrunjdwp")) {
+                cmdList.add(args[i]);
+                args[i] = null;
+            }
+        }
+
         cmdList.add("-Xbootclasspath/p:" +
                 "./lib/Runtime.jar" + File.pathSeparator +
                 "./lib/PlatformRuntime.jar" + File.pathSeparator +
@@ -151,17 +157,18 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                 "./lib/ServerInterfaces.jar");
         cmdList.add("-javaagent:./lib/RuntimeAgent.jar");
         cmdList.add("-Djava.nio.file.spi.DefaultFileSystemProvider=org.rowland.jinix.nio.JinixFileSystemProvider");
+        //cmdList.add("-Dsun.rmi.dgc.logLevel=VERBOSE");
         //cmdList.add("-Dsun.misc.URLClassPath.debug=true");
         //cmdList.add("-Djava.security.debug=\"access,failure\"");
         if (codebaseURL != null) {
-            //cmdList.add("-Djava.rmi.server.codebase="+codebaseURL);
+            cmdList.add("-Djava.rmi.server.codebase="+codebaseURL);
             //cmdList.add("-Djava.rmi.server.logCalls=true");
-            //cmdList.add("-Dsun.rmi.server.logLevel=VERBOSE");
+            //cmdList.add("-Dsun.rmi.dgc.logLevel=VERBOSE");
             //cmdList.add("-Dsun.rmi.client.logCalls=true");
             //cmdList.add("-Dsun.rmi.client.logLevel=VERBOSE");
             //cmdList.add("-Dsun.rmi.loader.logLevel=VERBOSE");
-
         }
+
         if (rmiMode == JinixKernel.RMI_MODE.AFUNIX) {
             cmdList.add("-DAFUNIXRMISocketFactory.config.file=./config");
             cmdList.add("-Djava.library.path=./lib");
@@ -176,13 +183,6 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
             classPathStr = classPathStr + File.pathSeparator + "./lib/AFUNIXRMI.jar";
         }
         cmdList.add(classPathStr);
-
-        for (int i=0; i<args.length; i++) {
-            if (args[i].equals("-Xdebug") || args[i].startsWith("-Xrunjdwp")) {
-                cmdList.add(args[i]);
-                args[i] = null;
-            }
-        }
 
         args = compressCmdArgs(args);
 
@@ -224,7 +224,6 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
             final Process osProcess = runtime.exec(cmdArray);
             //registerOSProcess(pid, osProcess); //TODO: figure out how to handle the OS process as ProcessData is not serializable
 
-            /*
             (new Thread(new Runnable() {
                 public void run() {
                     try {
@@ -233,12 +232,34 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                     } catch (InterruptedException e) {
                         return;
                     }
+
+                    if (osProcess.exitValue() > 0) {
+                        logger.severe("Internal Failure. Process returned exit value: "+osProcess.exitValue());
+                        try {
+                            if (stdErr != null) {
+                                ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                                OutputStreamWriter byteWriter = new OutputStreamWriter(bos);
+                                byteWriter.write("Internal failure launching OS process. Check debugging parameters.\n");
+                                stdErr.write(-1, bos.toByteArray());
+                                stdErr.flush();
+                            }
+                        } catch (IOException e) {
+                            logger.log(Level.SEVERE, "", e);
+                        }
+                        try {
+                            pm.deRegisterProcess(pid, osProcess.exitValue());
+                        } catch (RemoteException e) {
+                            logger.log(Level.SEVERE, "Failure deregistering process", e);
+                        }
+                    }
+                    /*
                     try {
                         logger.fine("Deregistering process: " +pid );
                         pm.deRegisterProcess(pid);
                     } catch (RemoteException e) {
                         logger.fine("ExecServer: RemoteExeception deregistering process: "+pid);
                     }
+                    */
                 }
             })).start();
 
@@ -259,11 +280,6 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
 
             Thread stdErrThread = new Thread(new Runnable() {public void run() {
                 try {
-                    Thread.sleep(2000);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-                try {
                     InputStream is = osProcess.getErrorStream();
                     int c = is.read();
                     while (c > -1) {
@@ -275,9 +291,9 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                 }
             }});
             stdErrThread.start();
-        */
+
         } catch (IOException e) {
-            pm.deRegisterProcess(pid);
+            pm.deRegisterProcess(pid, 1);
             throw new RemoteException("Failure starting underlying OS process.", e);
         }
 

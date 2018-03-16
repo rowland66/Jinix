@@ -41,6 +41,7 @@ public interface ProcessManager extends Remote {
         public int getPid();
         public int getProcessGroupId();
         public ProcessState getState();
+        public int getExitStatus();
     }
 
     /**
@@ -57,7 +58,7 @@ public interface ProcessManager extends Remote {
      */
     RegisterResult registerProcess(int parentId, int processGroupId, String cmd, String[] args) throws RemoteException;
 
-    void deRegisterProcess(int id) throws RemoteException;
+    void deRegisterProcess(int id, int exitStatus) throws RemoteException;
 
     void updateProcessState(int id, ProcessState state) throws RemoteException;
 

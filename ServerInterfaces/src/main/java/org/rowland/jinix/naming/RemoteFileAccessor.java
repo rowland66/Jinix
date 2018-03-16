@@ -52,4 +52,6 @@ public interface RemoteFileAccessor extends Remote {
     void duplicate() throws RemoteException;
 
     void force(boolean metadata) throws RemoteException;
+
+    void flush() throws RemoteException;
 }

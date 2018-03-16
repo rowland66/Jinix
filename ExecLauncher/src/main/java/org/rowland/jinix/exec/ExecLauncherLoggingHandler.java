@@ -10,10 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Date;
-import java.util.logging.Formatter;
-import java.util.logging.LogRecord;
-import java.util.logging.SimpleFormatter;
-import java.util.logging.StreamHandler;
+import java.util.logging.*;
 
 /**
  * A java.util.logging Handler that the ExecLauncher uses for translators. Since
@@ -31,6 +28,7 @@ class ExecLauncherLoggingHandler extends StreamHandler {
                 StandardOpenOption.CREATE);
         setFormatter(new DefaultTranslatorFormatter());
         setOutputStream(logStream);
+        setLevel(Level.ALL);
     }
 
     @Override

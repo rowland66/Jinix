@@ -7,6 +7,7 @@ import org.rowland.jinix.lang.JinixRuntime;
 import org.rowland.jinix.lang.ProcessSignalHandler;
 import org.rowland.jinix.naming.NameSpace;
 import org.rowland.jinix.proc.ProcessManager;
+import org.rowland.jinix.terminal.TerminalAttributes;
 
 import javax.naming.Context;
 import java.io.FileNotFoundException;
@@ -38,6 +39,16 @@ public class ConsoleFakeJinixRuntime extends JinixRuntime {
     @Override
     public int fork() throws FileNotFoundException, InvalidExecutableException {
         return 0;
+    }
+
+    @Override
+    public int fork(JinixFileDescriptor in, JinixFileDescriptor out, JinixFileDescriptor error) throws FileNotFoundException, InvalidExecutableException {
+        return 0;
+    }
+
+    @Override
+    public JinixFileDescriptor getStandardFileDescriptor(StandardFileDescriptor sfd) {
+        return null;
     }
 
     @Override
@@ -116,12 +127,32 @@ public class ConsoleFakeJinixRuntime extends JinixRuntime {
     }
 
     @Override
+    public short getProcessTerminalId() {
+        return 0;
+    }
+
+    @Override
     public void setProcessTerminalId(short terminalId) {
 
     }
 
     @Override
     public void setForegroundProcessGroupId(int processGroupId) {
+
+    }
+
+    @Override
+    public TerminalAttributes getTerminalAttributes(short terminalId) {
+        return null;
+    }
+
+    @Override
+    public void setTerminalAttributes(short terminalId, TerminalAttributes terminalAttributes) {
+
+    }
+
+    @Override
+    public void exit(int status) {
 
     }
 }

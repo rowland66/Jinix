@@ -98,4 +98,9 @@ public class StringRemoteFileAccessor extends JinixKernelUnicastRemoteObject imp
     public void force(boolean metadata) throws RemoteException {
         throw new UnsupportedOperationException();
     }
+
+    @Override
+    public void flush() throws RemoteException {
+
+    }
 }

@@ -47,7 +47,7 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
      * Create and register a new ProcessManager process. This method is called by an Executor.
      *
      * @param parentId process id of the processes parent. Translators have parentId -1, session
-     *                 group leaders and daemons have parent id 0
+     *                 group leaders and daemons have parent id 1
      * @param processGroupId
      * @param cmd
      * @param args
@@ -55,7 +55,7 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
      * @throws RemoteException
      */
     @Override
-    public RegisterResult registerProcess(int parentId, int processGroupId, String cmd, String[] args)
+    public synchronized RegisterResult registerProcess(int parentId, int processGroupId, String cmd, String[] args)
             throws RemoteException {
 
         if (state == State.STOPPING || state == State.SHUTDOWN) {
@@ -137,7 +137,8 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
      * @return boolean indicating if the process existed and was deregistered. A possible condition could exist where
      * two thread try to de
      */
-    public synchronized void deRegisterProcess(int id) {
+    @Override
+    public synchronized void deRegisterProcess(int id, int exitStatus) {
         Proc p = processMap.get(id);
 
         if (p == null) {
@@ -156,7 +157,14 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
             p.pendingSignals.notifyAll();
         }
 
-        if (p.parentId <= 0) {
+        // The only process with parent id 0 is init. If init is shutting down, then shutdown the kernel.
+        if (p.parentId == 0) {
+
+        }
+
+        // If the process is a daemon (child of init at pid 1) clean it up and return as init does not listen for children.
+        /*
+        if (p.parentId == 1) {
             synchronized (processMap) {
                 List<Proc> processGroupList = processGroupMap.get(p.processGroup);
                 synchronized (processGroupList) {
@@ -169,20 +177,26 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
                 return;
             }
         }
+        */
 
         p.state = ProcessState.SHUTDOWN;
         p.isZombie = true;
-
-        Proc parent = processMap.get(p.parentId);
+        p.exitStatus = exitStatus;
 
         enqueueParentEventWaiters(p);
 
-        // Any children of the process being deregistered get their parentId set to 0. They are daemons.
+        // Any children of the process being deregistered become children of init. They are daemons.
         if (!p.children.isEmpty()) {
+            Proc initProc = processMap.get(1);
             for (Proc child : p.children) {
-                child.parentId = 0;
+                child.parentId = 1;
+                synchronized (initProc.children) {
+                    initProc.children.add(child);
+                }
             }
         }
+
+        Proc parent = processMap.get(p.parentId);
 
         synchronized (processMap) {
             List<Proc> processGroupList = processGroupMap.get(p.processGroup);
@@ -241,7 +255,7 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
         ChildWaitObject childWaitObject = null;
         synchronized (parent.eventWaiters) {
             childWaitObject = parent.eventWaiters.get(EventName.CHILD);
-            if ( childWaitObject != null){
+            if (childWaitObject != null){
                 for (Proc listObject : childWaitObject.processList) {
                     if (listObject.id == p.id) {
                         return;
@@ -327,7 +341,7 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
                 }
                 if (!childWaitObject.processList.isEmpty()) {
                     Proc childProcess = childWaitObject.processList.removeFirst();
-                    return new ChildEventImpl(childProcess.id, childProcess.processGroup, childProcess.state);
+                    return new ChildEventImpl(childProcess.id, childProcess.processGroup, childProcess.state, childProcess.exitStatus);
                 }
                 // We may get notified when the process has been terminated.
                 if (p.state == ProcessState.SHUTDOWN) {
@@ -1010,6 +1024,8 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
         } catch (InterruptedException e) {
             // Should not happen
         }
+
+        logger.info("Process shut down: " + id);
     }
 
     static class Proc {
@@ -1022,6 +1038,7 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
         String[] args;
         long startTime;
         Process osProcess;
+        int exitStatus;
         boolean isZombie;
         int sessionId;
         List<Proc> children;
