@@ -39,8 +39,7 @@ public class JinixProcess extends Process {
                 environment.setProperty(JinixRuntime.JINIX_ENV_PWD, dir);
             }
             ChildListenerDeamon.startDeamon(); // This will only start the deamon if it is not already started
-            int progGrpId = JinixRuntime.getRuntime().getProcessGroupId();
-            this.pid = JinixRuntime.getRuntime().exec(environment, cmd, args, progGrpId, child_fds[0], child_fds[1], child_fds[2]);
+            this.pid = JinixRuntime.getRuntime().exec(environment, cmd, args, 0, child_fds[0], child_fds[1], child_fds[2]);
             runningChildrenMap.put(this.pid, this);
             initStreams(parent_fds);
         } catch (InvalidExecutableException e) {

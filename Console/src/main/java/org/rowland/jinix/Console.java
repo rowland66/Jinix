@@ -50,7 +50,7 @@ public class Console {
                 slaveFileDescriptor.getHandle().duplicate(); // We need to dup the slave RemoteFileAccessor twice because we are
                 slaveFileDescriptor.getHandle().duplicate(); // passing 3 slave FileChannels, and ExecLauncher will close all three
 
-                int pid = es.exec(null, "/bin/jsh.jar", new String[]{"/home"}, 1, -1,
+                int pid = es.exec(null, "/bin/jsh.jar", new String[]{"-Xdebug","-Xrunjdwp:transport=dt_socket,address=5559,server=y,suspend=n","/home"}, 1, -1, -1,
                         slaveFileDescriptor.getHandle(), slaveFileDescriptor.getHandle(), slaveFileDescriptor.getHandle());
 
                 pm.setProcessTerminalId(pid, terminalId);

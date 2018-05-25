@@ -56,7 +56,7 @@ public interface ProcessManager extends Remote {
      * @return
      * @throws RemoteException
      */
-    RegisterResult registerProcess(int parentId, int processGroupId, String cmd, String[] args) throws RemoteException;
+    RegisterResult registerProcess(int parentId, int processGroupId, int sessionId, String cmd, String[] args) throws RemoteException;
 
     void deRegisterProcess(int id, int exitStatus) throws RemoteException;
 

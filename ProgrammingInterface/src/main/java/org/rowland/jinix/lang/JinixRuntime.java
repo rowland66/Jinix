@@ -85,6 +85,11 @@ public abstract class JinixRuntime {
     public abstract int exec(String cmd, String[] args)
             throws FileNotFoundException, InvalidExecutableException;
 
+
+    public abstract int exec(Properties env, String cmd, String[] args, int processGroupId,
+                             JinixFileDescriptor stdin, JinixFileDescriptor stdout, JinixFileDescriptor stderr)
+            throws FileNotFoundException, InvalidExecutableException;
+
     /**
      * Execute a Jinix executable image in a new process providing a customized environment,
      * input, output and error file descriptors.
@@ -97,6 +102,8 @@ public abstract class JinixRuntime {
      *             main() method.
      * @param processGroupId -1 to set the processGroupId to the pid of the new process (ie. create a new process group),
      *                       0 to join the processGroup of the parent, any other value will be assigned directly as the processGroupId
+     * @param sessionId -1 to set the sessionId to the pid of the new process (ie. create a new session), 0 to join
+     *                  the session of the parent process.
      * @param stdin
      * @param stdout
      * @param stderr
@@ -104,7 +111,7 @@ public abstract class JinixRuntime {
      * @throws FileNotFoundException
      * @throws InvalidExecutableException
      */
-    public abstract int exec(Properties env, String cmd, String[] args, int processGroupId,
+    public abstract int exec(Properties env, String cmd, String[] args, int processGroupId, int sessionId,
                              JinixFileDescriptor stdin, JinixFileDescriptor stdout, JinixFileDescriptor stderr)
             throws FileNotFoundException, InvalidExecutableException;
 

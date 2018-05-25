@@ -55,7 +55,7 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
      * @throws RemoteException
      */
     @Override
-    public synchronized RegisterResult registerProcess(int parentId, int processGroupId, String cmd, String[] args)
+    public synchronized RegisterResult registerProcess(int parentId, int processGroupId, int sessionId, String cmd, String[] args)
             throws RemoteException {
 
         if (state == State.STOPPING || state == State.SHUTDOWN) {
@@ -72,10 +72,18 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
             if (processGroupId == 0) {
                 processGroupId = parentProc.processGroup;
             }
+
+            if (sessionId == 0) {
+                sessionId = parentProc.sessionId;
+            }
         }
 
         if (processGroupId == 0) {
             throw new RemoteException("Invalid call processGroupId = 0 and parentId = 0");
+        }
+
+        if (sessionId == 0) {
+            throw new RemoteException("Invalid call sessionId = 0 and parentId = 0");
         }
 
         Proc p = new Proc();
@@ -83,7 +91,7 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
         p.parentId = parentId;
         p.processGroup = (processGroupId == -1 ? p.id : processGroupId);
         p.terminal = (parentProc != null ? parentProc.terminal : -1);
-        p.sessionId = (parentProc != null ? parentProc.sessionId : p.id);
+        p.sessionId = (sessionId == -1 ? p.id : sessionId);
         p.state = ProcessState.STARTING;
         p.cmd = cmd;
         p.args = args;

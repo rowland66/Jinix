@@ -1,6 +1,5 @@
 package org.rowland.jinix;
 
-import jdk.nashorn.internal.lookup.Lookup;
 import org.rowland.jinix.exec.ExecRMIClassLoader;
 import org.rowland.jinix.exec.ExecServer;
 import org.rowland.jinix.exec.InvalidExecutableException;
@@ -142,7 +141,7 @@ public class JinixKernel {
             }
 
             try {
-                int initPid = es.exec(null, "/sbin/init.jar", new String[] {}, 0, -1, raf, raf, raf);
+                int initPid = es.exec(null, "/sbin/init.jar", new String[] {"-Xdebug","-Xrunjdwp:transport=dt_socket,address=5557,server=y,suspend=y"}, 0, -1, -1, raf, raf, raf);
             } catch (FileNotFoundException e) {
                 System.err.println("Init executable not found at /sbin/init.jar");
                 if (raf != null) {

@@ -54,8 +54,14 @@ public class Init {
                         JinixRuntime runtime = JinixRuntime.getRuntime();
                         ProcessData[] processData = pm.getProcessData();
                         for (ProcessData p : processData) {
-                            if (p.parentId == 1 && p.id != 6) {
+                            if (p.parentId == 1 && p.sessionId != 1) { // Terminate all processes that are not translators
                                 System.out.println("Init: Shutting down process: "+p.id);
+                                runtime.sendSignalProcessGroup(p.processGroupId, ProcessManager.Signal.TERMINATE);
+                            }
+                        }
+                        for (ProcessData p : processData) {
+                            if (p.parentId == 1 && p.sessionId == 1) { // Terminate all processes that are translators
+                                System.out.println("Init: Shutting down translator process: "+p.id);
                                 runtime.sendSignalProcessGroup(p.processGroupId, ProcessManager.Signal.TERMINATE);
                             }
                         }
@@ -80,8 +86,6 @@ public class Init {
         } catch (InterruptedException e) {
 
         }
-
-        System.exit(0);
     }
 
     private static void executeInitLine(String initLine) {

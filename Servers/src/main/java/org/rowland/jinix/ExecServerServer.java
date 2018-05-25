@@ -45,7 +45,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
     @Override
     public int execTranslator(String cmd, String[] args, RemoteFileAccessor translatorNode, String translatorNodePath)
             throws FileNotFoundException, InvalidExecutableException, RemoteException {
-        return exec0(null, cmd, args, 1, -1,
+        return exec0(null, cmd, args, 1, -1, 1,
                 null, null, null,
                 translatorNode, translatorNodePath, "file://"+cmd);
     }
@@ -56,11 +56,12 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                     String[] args,
                     int parentId,
                     int processGroupId,
+                    int sessionId,
                     RemoteFileAccessor stdIn,
                     RemoteFileAccessor stdOut,
                     RemoteFileAccessor stdErr)
             throws FileNotFoundException, InvalidExecutableException, RemoteException {
-        return exec0(env, cmd, args, parentId, processGroupId, stdIn, stdOut, stdErr, null, null, null);
+        return exec0(env, cmd, args, parentId, processGroupId, sessionId, stdIn, stdOut, stdErr, null, null, null);
     }
 
     private int exec0(Properties env,
@@ -68,6 +69,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                       String[] args,
                       int parentId,
                       int processGroupId,
+                      int sessionId,
                       RemoteFileAccessor stdIn,
                       RemoteFileAccessor stdOut,
                       RemoteFileAccessor stdErr,
@@ -130,7 +132,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
             }
         }
 
-        RegisterResult result = pm.registerProcess(parentId, processGroupId, cmd, args);
+        RegisterResult result = pm.registerProcess(parentId, processGroupId, sessionId, cmd, args);
         final int pid = result.pid;
         final int pgid = result.pgid;
 
@@ -142,6 +144,9 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
         }
         List<String> cmdList = new ArrayList<>(16);
         cmdList.add(javaCmd);
+
+        // Added to simplify debugging when looking at OS processes. This system property is not used.
+        cmdList.add("-Djinix.pid="+Integer.toString(pid));
 
         for (int i=0; i<args.length; i++) {
             if (args[i].equals("-Xdebug") || args[i].startsWith("-Xrunjdwp")) {
@@ -224,7 +229,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
             final Process osProcess = runtime.exec(cmdArray);
             //registerOSProcess(pid, osProcess); //TODO: figure out how to handle the OS process as ProcessData is not serializable
 
-            (new Thread(new Runnable() {
+            (new Thread(Thread.currentThread().getThreadGroup(), new Runnable() {
                 public void run() {
                     try {
                         logger.fine("Waiting for osProcess: "+pid);
@@ -261,10 +266,10 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                     }
                     */
                 }
-            })).start();
+            },"Exec Server Thread 1"+cmd)).start();
 
             // These 2 thread are not really needed, but are left in for easier debugging.
-            Thread stdOutThread = new Thread(new Runnable() {public void run() {
+            Thread stdOutThread = new Thread(Thread.currentThread().getThreadGroup(), new Runnable() {public void run() {
                 try {
                     InputStream is = osProcess.getInputStream();
                     int c = is.read();
@@ -275,7 +280,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
-            }});
+            }},"Exec Server StdOut"+cmd);
             stdOutThread.start();
 
             Thread stdErrThread = new Thread(new Runnable() {public void run() {
@@ -289,7 +294,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
-            }});
+            }},"Exec Server StdIn"+cmd);
             stdErrThread.start();
 
         } catch (IOException e) {

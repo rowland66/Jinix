@@ -37,6 +37,11 @@ public class ConsoleFakeJinixRuntime extends JinixRuntime {
     }
 
     @Override
+    public int exec(Properties env, String cmd, String[] args, int processGroupId, int sessionId, JinixFileDescriptor stdin, JinixFileDescriptor stdout, JinixFileDescriptor stderr) throws FileNotFoundException, InvalidExecutableException {
+        return 0;
+    }
+
+    @Override
     public int fork() throws FileNotFoundException, InvalidExecutableException {
         return 0;
     }

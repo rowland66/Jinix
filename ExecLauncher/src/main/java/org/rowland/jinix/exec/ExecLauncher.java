@@ -598,6 +598,13 @@ public class ExecLauncher {
         @Override
         public int exec(Properties environment, String cmd, String[] args, int processGroupId,
                         JinixFileDescriptor stdin, JinixFileDescriptor stdout, JinixFileDescriptor stderr)
+                throws FileNotFoundException, InvalidExecutableException {
+            return exec(JinixSystem.getJinixProperties(), cmd, args, processGroupId, 0, stdin, stdout, stderr);
+        }
+
+        @Override
+        public int exec(Properties environment, String cmd, String[] args, int processGroupId, int sessionId,
+                        JinixFileDescriptor stdin, JinixFileDescriptor stdout, JinixFileDescriptor stderr)
             throws FileNotFoundException, InvalidExecutableException {
             try {
 
@@ -612,7 +619,7 @@ public class ExecLauncher {
                 stdout.getHandle().duplicate();
                 stderr.getHandle().duplicate();
 
-                return es.exec(environment, cmd, args, ExecLauncher.pid, processGroupId,
+                return es.exec(environment, cmd, args, ExecLauncher.pid, processGroupId, sessionId,
                         stdin.getHandle(), stdout.getHandle(), stderr.getHandle());
             } catch (RemoteException e) {
                 throw new RuntimeException(e);

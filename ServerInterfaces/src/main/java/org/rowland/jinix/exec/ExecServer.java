@@ -30,6 +30,8 @@ public interface ExecServer extends Remote {
      * @param parentId the process ID of the current process, or 0 if the process has no parent.
      * @param processGroupId -1 to set the processGroupId to the pid (ie. create a new process group), 0 join the
      *                       processGroup of the parent, any other number assign directly as the processGroupId
+     * @param sessionId -1 to set the sessionId to the pid (ie. create a new session). 0 to join the session of the
+     *                  parent.
      * @param stdIn
      * @param stdOut
      * @param stdErr
@@ -42,6 +44,7 @@ public interface ExecServer extends Remote {
              String[] args,
              int parentId,
              int processGroupId,
+             int sessionId,
              RemoteFileAccessor stdIn,
              RemoteFileAccessor stdOut,
              RemoteFileAccessor stdErr)
