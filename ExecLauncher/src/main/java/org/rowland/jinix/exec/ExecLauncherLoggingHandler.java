@@ -25,7 +25,8 @@ class ExecLauncherLoggingHandler extends StreamHandler {
     ExecLauncherLoggingHandler(Path logFilePath) throws IOException {
         OutputStream logStream = Files.newOutputStream(logFilePath,
                 StandardOpenOption.WRITE,
-                StandardOpenOption.CREATE);
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING);
         setFormatter(new DefaultTranslatorFormatter());
         setOutputStream(logStream);
         setLevel(Level.ALL);

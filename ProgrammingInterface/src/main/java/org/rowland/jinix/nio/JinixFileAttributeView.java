@@ -148,7 +148,7 @@ public class JinixFileAttributeView implements BasicFileAttributeView {
 
     @Override
     public JinixFileAttributes readAttributes() throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(p.toAbsolutePath().toString());
+        LookupResult lookup = JinixRuntime.getRuntime().lookup(p.toAbsolutePath().toString());
         if (!(lookup.remote instanceof FileNameSpace)) {
             DirectoryFileData dfd = new DirectoryFileData();
             dfd.name = p.getFileName().toString();
@@ -177,7 +177,7 @@ public class JinixFileAttributeView implements BasicFileAttributeView {
         if (lastModifiedTime != null) {
             DirectoryFileData dfd = new DirectoryFileData();
             dfd.lastModified = lastModifiedTime.toMillis();
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(p.toAbsolutePath().toString());
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(p.toAbsolutePath().toString());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             fns.setFileAttributes(lookup.remainingPath, dfd);
         }

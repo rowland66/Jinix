@@ -228,9 +228,8 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
      */
     public final FileDescriptor getFD() throws IOException {
 
-        //TODO: Add support for FileDescriptors using Jinix
         if (jinixRandomAccessFile != null) {
-            throw new RuntimeException("Operation not supported: getFD()");
+            return jinixRandomAccessFile.getFD();
         }
 
         // Standard JDK Code starts here
@@ -682,6 +681,7 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
 
         if (jinixRandomAccessFile != null) {
             jinixRandomAccessFile.close();
+            return;
         }
 
         // Standard JDK Code starts here

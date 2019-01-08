@@ -153,7 +153,11 @@ public class FileDescriptor {
      *        buffers have been synchronized with physical media.
      * @since     JDK1.1
      */
-    public native void sync() throws SyncFailedException;
+    public native void $$$Jinix$$$_sync() throws SyncFailedException;
+
+    public void sync() throws SyncFailedException {
+        $$$Jinix$$$_sync();
+    }
 
     /* This routine initializes JNI field offsets for the class */
     private static native void initIDs();

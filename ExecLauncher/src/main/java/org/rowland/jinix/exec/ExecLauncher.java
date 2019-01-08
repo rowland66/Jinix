@@ -66,10 +66,12 @@ public class ExecLauncher {
     private static String execCmd;
     private static String[] execArgs;
     private static ProcessSignalHandler signalHandler;
+    private static Thread signalListenerThread;
     private static List<Thread> runtimeThreads;
 
     private static ProcessManager.ProcessState state;
-    private static int exitStatus = 0;
+    private static int exitStatus = -1;
+    private static boolean translatorBound = false;
 
     public static void launch(int pid, int pgid) {
 
@@ -107,7 +109,8 @@ public class ExecLauncher {
             } else {
                 translatorNode = new JinixFileDescriptor(execLaunchData.translatorNode);
                 translatorNodePath = execLaunchData.translatorNodePath;
-                setupJinixEnvironment(new Properties());
+                Properties env = getTranslatorEnvironment();
+                setupJinixEnvironment(env);
                 for (int i=0; i<execArgs.length; i++) {
                     String arg = execArgs[i];
                     if (arg.equals("-jinix:native")) {
@@ -154,7 +157,7 @@ public class ExecLauncher {
                     throw new NoSuchMethodException("main");
                 }
 
-                // The Jinix security realm is not in effect. All access to resources beyond this point is through Jinix
+                // The Jinix security realm is now in effect. All access to resources beyond this point is through Jinix
                 Policy.setPolicy(new JinixPolicy());
                 System.setSecurityManager(new SecurityManager());
 
@@ -162,16 +165,6 @@ public class ExecLauncher {
 
                 Thread execThread = new Thread(execThreadGroup, new ExecThreadRunnable(m, execArgs), "Jinix Main");
                 execThread.setContextClassLoader(execCL);
-
-                /*
-                try {
-                    Thread.class.getDeclaredMethod("setJinixThread").invoke(null);
-                } catch (IllegalAccessException e) {
-                    throw new RuntimeException(e);
-                } catch (InvocationTargetException e) {
-                    throw new RuntimeException(e);
-                }
-                */
 
                 execThread.start();
 
@@ -224,26 +217,27 @@ public class ExecLauncher {
         }
     }
 
-    private static void setupJinixEnvironment(Properties environment) {
-
-        for (Object propertyName: environment.keySet()) {
-            JinixSystem.setJinixProperty((String)propertyName, (String)environment.get(propertyName));
-        }
+    private static Properties getTranslatorEnvironment() {
+        Properties env = new Properties();
 
         // Add default variables to the environment if they are not already there
-        if (JinixSystem.getJinixProperties().getProperty(JinixRuntime.JINIX_PATH) == null) {
-            JinixSystem.setJinixProperty(JinixRuntime.JINIX_PATH,"/bin");
-        }
-        if (JinixSystem.getJinixProperties().getProperty(JinixRuntime.JINIX_LIBRARY_PATH) == null) {
-            JinixSystem.setJinixProperty(JinixRuntime.JINIX_LIBRARY_PATH, "/lib");
-        }
-        if (JinixSystem.getJinixProperties().getProperty(JinixRuntime.JINIX_PATH_EXT) == null) {
-            JinixSystem.setJinixProperty(JinixRuntime.JINIX_PATH_EXT, "jar");
+        env.put(JinixRuntime.JINIX_PATH,"/bin");
+        env.put(JinixRuntime.JINIX_LIBRARY_PATH, "/lib");
+        env.put(JinixRuntime.JINIX_PATH_EXT, "jar");
+        env.put(JinixRuntime.JINIX_ENV_PWD, "/var/log");
+        return env;
+    }
+
+    private static void setupJinixEnvironment(Properties environment) {
+
+        for (Map.Entry propertyEntry : environment.entrySet()) {
+            JinixSystem.setJinixProperty((String)propertyEntry.getKey(), (String)propertyEntry.getValue());
         }
 
         if (environment.containsKey(JinixRuntime.JINIX_ENV_PWD)) {
             JinixSystem.setJinixProperty("user.dir", environment.getProperty(JinixRuntime.JINIX_ENV_PWD));
         }
+
         JinixSystem.setJinixProperty("java.library.path", null);
         JinixSystem.setJinixProperty("user.home", "/home");
         JinixSystem.setJinixProperty("java.io.tmpdir", "/home/tmp");
@@ -310,7 +304,9 @@ public class ExecLauncher {
         }
 
         for (Thread t : runtimeThreads) {
-            t.suspend();
+            if (t != signalListenerThread) { // We never suspend the signal listener because we need to be able to receive signals
+                t.suspend();
+            }
         }
         state = ProcessManager.ProcessState.SUSPENDED;
         pm.updateProcessState(pid, state);
@@ -384,71 +380,88 @@ public class ExecLauncher {
 
         launch(pid, pgid);
 
+        signalListenerThread = new SignalListenerDaemonThread();
+        signalListenerThread.start();
+
         try {
             state = ProcessManager.ProcessState.RUNNING;
             pm.updateProcessState(pid, state);
         } catch (RemoteException e) {
             // ignore as the state updated can be skipped
         }
-
-        try {
-            while (true) {
-                ProcessManager.Signal signal = pm.listenForSignal(pid);
-                if (signal == null) {
-                    // Should only happen when the process is terminating. ProcessManager.deRegisterProcess() will wake
-                    // up waiting thread, and it will return null;
-                    return;
-                }
-
-                switch (signal) {
-                    case ABORT:
-                    case KILL:
-                        System.exit(0);
-                        break;
-                    case HANGUP:
-                        if (signalHandler == null || !signalHandler.handleSignal(signal)) {
-                            System.exit(0);
-                        }
-                        break;
-                    case TERMINATE:
-                        if (signalHandler == null || !signalHandler.handleSignal(signal)) {
-                            System.exit(0);
-                        }
-                        break;
-                    case STOP:
-                        suspend();
-                        break;
-                    case TSTOP:
-                        if (signalHandler == null || !signalHandler.handleSignal(signal)) {
-                            suspend();
-                        }
-                        break;
-                    case CONTINUE:
-                        resume();
-                        break;
-                    case CHILD:
-                        if (signalHandler != null) {
-                            signalHandler.handleSignal(signal);
-                        }
-                        break;
-                    case TERMINAL_INPUT:
-                        if (signalHandler == null || !signalHandler.handleSignal(signal)) {
-                            suspend();
-                        }
-                        break;
-                    case TERMINAL_OUTPUT:
-                        if (signalHandler == null || !signalHandler.handleSignal(signal)) {
-                            suspend();
-                        }
-                        break;
-                }
-            }
-        } catch (RemoteException e) {
-            e.printStackTrace();
-        }
     }
 
+    static private class SignalListenerDaemonThread extends Thread {
+
+        private SignalListenerDaemonThread() {
+            super("SignalListenerDaemon");
+            setDaemon(true);
+        }
+
+        public void run() {
+            try {
+                while (true) {
+                    ProcessManager.Signal signal = pm.listenForSignal(pid);
+                    if (signal == null) {
+                        // Should only happen when the process is terminating. ProcessManager.deRegisterProcess() will wake
+                        // up waiting thread, and it will return null;
+                        return;
+                    }
+
+                    switch (signal) {
+                        case KILL:
+                            System.exit(0);
+                            break;
+                        case HANGUP:
+                            if (signalHandler == null || !signalHandler.handleSignal(signal)) {
+                                System.exit(0);
+                            }
+                            break;
+                        case TERMINATE:
+                            if (signalHandler == null || !signalHandler.handleSignal(signal)) {
+                                System.exit(0);
+                            }
+                            break;
+                        case STOP:
+                            ExecLauncher.suspend();
+                            break;
+                        case TSTOP:
+                            if (signalHandler == null || !signalHandler.handleSignal(signal)) {
+                                ExecLauncher.suspend();
+                            }
+                            break;
+                        case CONTINUE:
+                            if (signalHandler == null || !signalHandler.handleSignal(signal)) {
+                                ExecLauncher.resume();
+                            }
+                            break;
+                        case CHILD:
+                            if (signalHandler != null) {
+                                signalHandler.handleSignal(signal);
+                            }
+                            break;
+                        case TERMINAL_INPUT:
+                            if (signalHandler == null || !signalHandler.handleSignal(signal)) {
+                                ExecLauncher.suspend();
+                            }
+                            break;
+                        case TERMINAL_OUTPUT:
+                            if (signalHandler == null || !signalHandler.handleSignal(signal)) {
+                                ExecLauncher.suspend();
+                            }
+                            break;
+                    }
+                }
+            } catch (RemoteException e) {
+                e.printStackTrace();
+            }
+        }
+    }
     static private class ExecLauncherShutdownThread extends Thread {
+
+        public ExecLauncherShutdownThread() {
+            super("ExecLauncher Shutdown Thread");
+        }
 
         @Override
         public void run() {
@@ -462,6 +475,14 @@ public class ExecLauncher {
 
             if (ExecLauncher.translatorNode != null) {
                 ExecLauncher.translatorNode.close();
+
+                if (!translatorBound) {
+                    try {
+                        rootNameSpace.translatorFailure(translatorNodePath);
+                    } catch (RemoteException e) {
+                        // Ignore as this should be unlikely, and there is nothing that we can do.
+                    }
+                }
             } else {
                 ExecLauncher.stdIn.close();
                 ExecLauncher.stdOut.close();
@@ -527,7 +548,7 @@ public class ExecLauncher {
             } finally {
 
                 JinixKernelUnicastRemoteObject.dumpExportedObjects(System.out);
-
+                /**
                 boolean livingThread = false;
                 do {
                     livingThread = false;
@@ -542,10 +563,7 @@ public class ExecLauncher {
                             }
                         }
                     }
-                } while (livingThread);
-
-                // Since the main ExecLauncher thread is waiting on a signal, send an abort signal.
-                JinixRuntime.getRuntime().sendSignal(pid, ProcessManager.Signal.ABORT);
+                } while (livingThread); */
             }
         }
     }
@@ -580,8 +598,40 @@ public class ExecLauncher {
     public static class JinixRuntimeImpl extends JinixRuntime {
 
         @Override
-        public NameSpace getRootNamespace() {
-            return rootNameSpace;
+        public LookupResult lookup(String path) {
+            try {
+                return rootNameSpace.lookup(pid, path);
+            } catch (RemoteException e) {
+                if (e.getCause() != null) {
+                    throw new RuntimeException("Internal error", e.getCause());
+                }
+                throw new RuntimeException("Transport error", e);
+            }
+        }
+
+        @Override
+        public void bind(String path, Object obj) {
+            try {
+                rootNameSpace.bind(path, (Remote) obj);
+            } catch (RemoteException e) {
+                if (e.getCause() != null) {
+                    throw new RuntimeException("Internal error", e.getCause());
+                }
+                throw new RuntimeException("Transport error", e);
+            }
+
+        }
+
+        @Override
+        public void unbind(String path) {
+            try {
+                rootNameSpace.unbind(path);
+            } catch (RemoteException e) {
+                if (e.getCause() != null) {
+                    throw new RuntimeException("Internal error", e.getCause());
+                }
+                throw new RuntimeException("Transport error", e);
+            }
         }
 
         @Override
@@ -599,7 +649,7 @@ public class ExecLauncher {
         public int exec(Properties environment, String cmd, String[] args, int processGroupId,
                         JinixFileDescriptor stdin, JinixFileDescriptor stdout, JinixFileDescriptor stderr)
                 throws FileNotFoundException, InvalidExecutableException {
-            return exec(JinixSystem.getJinixProperties(), cmd, args, processGroupId, 0, stdin, stdout, stderr);
+            return exec(environment, cmd, args, processGroupId, 0, stdin, stdout, stderr);
         }
 
         @Override
@@ -691,6 +741,15 @@ public class ExecLauncher {
         }
 
         @Override
+        public ProcessManager.ChildEvent waitForChild(int pid, boolean nowait) {
+            try {
+                return pm.waitForChild(ExecLauncher.pid, pid, nowait);
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
         public JinixPipe pipe() {
             try {
                 FifoServer fs = (FifoServer) rootNameSpace.lookup(FifoServer.SERVER_NAME).remote;
@@ -739,6 +798,7 @@ public class ExecLauncher {
         @Override
         public void bindTranslator(Remote translator) {
             try {
+                translatorBound = true;
                 rootNameSpace.bind(translatorNodePath, translator);
             } catch (RemoteException e) {
                 throw new RuntimeException(e);
@@ -826,18 +886,17 @@ public class ExecLauncher {
 
         @Override
         public synchronized void exit(int status) {
-            exitStatus = status;
-            sendSignal(pid, ProcessManager.Signal.ABORT);
-            while (true) {
-                try {
-                    // wait until the abort signal is received and JVM terminates.
-                    wait();
-                } catch (InterruptedException e) {
-                    // We should never be interrupted.
-                }
+
+            if (status < 0 || status > 255) {
+                throw new IllegalArgumentException("Exit called with invalid status: "+status);
             }
+            exitStatus = status;
+            System.exit(0);
+        }
+
+        @Override
+        public void addLibraryToClassloader(String jarFile) {
+            execCL.addLibraryToClasspath(jarFile);
         }
     }
-
-
 }

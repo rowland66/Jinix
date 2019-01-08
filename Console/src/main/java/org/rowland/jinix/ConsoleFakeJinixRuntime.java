@@ -5,6 +5,7 @@ import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixPipe;
 import org.rowland.jinix.lang.JinixRuntime;
 import org.rowland.jinix.lang.ProcessSignalHandler;
+import org.rowland.jinix.naming.LookupResult;
 import org.rowland.jinix.naming.NameSpace;
 import org.rowland.jinix.proc.ProcessManager;
 import org.rowland.jinix.terminal.TerminalAttributes;
@@ -17,8 +18,18 @@ import java.util.Properties;
 public class ConsoleFakeJinixRuntime extends JinixRuntime {
 
     @Override
-    public NameSpace getRootNamespace() {
+    public LookupResult lookup(String path) {
         return null;
+    }
+
+    @Override
+    public void bind(String path, Object obj) {
+
+    }
+
+    @Override
+    public void unbind(String path) {
+
     }
 
     @Override
@@ -73,6 +84,11 @@ public class ConsoleFakeJinixRuntime extends JinixRuntime {
 
     @Override
     public ProcessManager.ChildEvent waitForChild(boolean nowait) {
+        return null;
+    }
+
+    @Override
+    public ProcessManager.ChildEvent waitForChild(int pid, boolean nowait) {
         return null;
     }
 
@@ -158,6 +174,11 @@ public class ConsoleFakeJinixRuntime extends JinixRuntime {
 
     @Override
     public void exit(int status) {
+
+    }
+
+    @Override
+    public void addLibraryToClassloader(String jarFile) {
 
     }
 }

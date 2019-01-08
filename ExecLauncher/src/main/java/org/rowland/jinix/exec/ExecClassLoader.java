@@ -99,6 +99,27 @@ public class ExecClassLoader extends SecureClassLoader {
         closed = false;
     }
 
+    void addLibraryToClasspath(String jarFile) {
+        String libraryPathStr = JinixSystem.getJinixProperties().getProperty(JinixRuntime.JINIX_LIBRARY_PATH);
+        if (libraryPathStr == null || libraryPathStr.isEmpty()) {
+            return;
+        }
+
+        Context ctx = JinixRuntime.getRuntime().getNamingContext();
+        String[] libraryPath = libraryPathStr.split(":");
+        for(String libDir : libraryPath) {
+            String libPathName = libDir + "/" + jarFile;
+            try {
+                remoteJarList.add(new RemoteJarHolder(libPathName, (RemoteJarFileAccessor) ctx.lookup(libPathName)));
+                break;
+            } catch (NameNotFoundException e) {
+                // Ignore. If we don't find the continue searching.
+            } catch (NamingException e) {
+                throw new RuntimeException("Internal error", e);
+            }
+        }
+    }
+
     @Override
     protected Class<?> findClass(String name) throws ClassNotFoundException {
         if (closed || remoteJarList == null) {
@@ -158,20 +179,19 @@ public class ExecClassLoader extends SecureClassLoader {
             result = AccessController.doPrivileged(
                     new PrivilegedExceptionAction<URL>() {
                         public URL run() throws MalformedURLException, RemoteException {
-                            String path = name.replace('.', '/');
                             String pkg;
-                            if (path.indexOf('/') == -1) {
+                            if (name.indexOf('/') == -1) {
                                 pkg = "/";
                             } else {
-                                pkg = path.substring(0, path.lastIndexOf("/"));
+                                pkg = name.substring(0, name.lastIndexOf("/"));
                             }
                             for (RemoteJarHolder remoteJarHolder : remoteJarList) {
                                 if (remoteJarHolder.pkg == null) {
                                     remoteJarHolder.pkg = remoteJarHolder.remoteJar.getPackages();
                                 }
                                 if (Arrays.binarySearch(remoteJarHolder.pkg, pkg) > -1) {
-                                    if (remoteJarHolder.remoteJar.findEntry(path) > -1) {
-                                        return new URL("jns", null, -1, remoteJarHolder.name+"!/"+path, new JinixFileStreamHandler());
+                                    if (remoteJarHolder.remoteJar.findEntry(name) > -1) {
+                                        return new URL("jns", null, -1, remoteJarHolder.name+"!/"+name, new JinixFileStreamHandler());
                                     }
                                 }
                             }
@@ -198,12 +218,11 @@ public class ExecClassLoader extends SecureClassLoader {
             result = AccessController.doPrivileged(
                     new PrivilegedExceptionAction<List<URL>>() {
                         public List<URL> run() throws MalformedURLException, RemoteException {
-                            String path = name.replace('.', '/');
                             String pkg;
-                            if (path.indexOf('/') == -1) {
+                            if (name.indexOf('/') == -1) {
                                 pkg = "/";
                             } else {
-                                pkg = path.substring(0, path.lastIndexOf("/"));
+                                pkg = name.substring(0, name.lastIndexOf("/"));
                             }
                             List<URL> rtrnList = new ArrayList<URL>();
                             for (RemoteJarHolder remoteJarHolder : remoteJarList) {
@@ -211,8 +230,8 @@ public class ExecClassLoader extends SecureClassLoader {
                                     remoteJarHolder.pkg = remoteJarHolder.remoteJar.getPackages();
                                 }
                                 if (Arrays.binarySearch(remoteJarHolder.pkg, pkg) > -1) {
-                                    if (remoteJarHolder.remoteJar.findEntry(path) > -1) {
-                                        rtrnList.add(new URL("jns", null, -1, remoteJarHolder.name+"!/"+path, new JinixFileStreamHandler()));
+                                    if (remoteJarHolder.remoteJar.findEntry(name) > -1) {
+                                        rtrnList.add(new URL("jns", null, -1, remoteJarHolder.name+"!/"+name, new JinixFileStreamHandler()));
                                     }
                                 }
                             }
@@ -318,25 +337,9 @@ public class ExecClassLoader extends SecureClassLoader {
      * Resolve all of the jar files in the manifest classpath in the library path, and add to the remoteJarList list.
      */
     private void resolveExecClassPath() throws IOException {
-        String libraryPathStr = JinixSystem.getJinixProperties().getProperty(JinixRuntime.JINIX_LIBRARY_PATH);
-        if (libraryPathStr == null || libraryPathStr.isEmpty()) {
-            return;
-        }
         String[] execClassPath = getLibraryNames();
-        Context ctx = JinixRuntime.getRuntime().getNamingContext();
-        String[] libraryPath = libraryPathStr.split(":");
         for (String jarFile : execClassPath) {
-            for(String libDir : libraryPath) {
-                String libPathName = libDir + "/" + jarFile;
-                try {
-                    remoteJarList.add(new RemoteJarHolder(libPathName, (RemoteJarFileAccessor) ctx.lookup(libPathName)));
-                    break;
-                } catch (NameNotFoundException e) {
-                    // Ignore. If we don't find the continue searching.
-                } catch (NamingException e) {
-                    throw new RuntimeException("Internal error", e);
-                }
-            }
+            addLibraryToClasspath(jarFile);
         }
     }
 

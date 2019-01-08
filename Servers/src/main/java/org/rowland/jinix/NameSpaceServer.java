@@ -78,6 +78,22 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
     }
 
     @Override
+    public void translatorFailure(String pathName) throws RemoteException {
+        if (namingOverlay.containsKey(pathName)) {
+            Object obj = namingOverlay.get(pathName);
+            if (obj instanceof TranslatorDefinition) {
+                TranslatorDefinition td = (TranslatorDefinition) obj;
+                synchronized (td) {
+                    td.remote = null;
+                    td.notify();
+                }
+                return;
+            }
+            namingOverlay.remove(pathName);
+        }
+    }
+
+    @Override
     public void unbind(String pathName) throws RemoteException {
         if (namingOverlay.containsKey(pathName)) {
             namingOverlay.remove(pathName);
@@ -102,7 +118,7 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
         }
 
         RemainingPath remainingPath = new RemainingPath("");
-        Object obj = lookupInternal(path, remainingPath, false);
+        Object obj = lookupInternal(path, remainingPath, false, -1);
 
         //TODO: Eventually we need to account for a possibility that lookup internal leads to another server. We need to
         // fix this so that path is a handle. This will allow lookupInternal to return the remainder of the path so that
@@ -172,7 +188,7 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
             Object obj = null;
             try {
                 RemainingPath remainingPath = new RemainingPath("");
-                obj = lookupInternal(path, remainingPath, false);
+                obj = lookupInternal(path, remainingPath, false, -1);
             } catch (FileNotFoundException | InvalidExecutableException e) {
                 // We should never get this exception since we are not activating translators
             }
@@ -211,6 +227,11 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
 
     @Override
     public LookupResult lookup(String path) throws RemoteException {
+        return lookup(0, path);
+    }
+
+    @Override
+    public LookupResult lookup(int pid, String path) throws RemoteException {
 
         if (!path.startsWith("/")) {
             throw new IllegalArgumentException("Lookup path must begin with slash: "+path);
@@ -219,7 +240,7 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
         RemainingPath remainingPath = new RemainingPath("");
         Object obj = null;
         try {
-            obj = lookupInternal(path, remainingPath, true);
+            obj = lookupInternal(path, remainingPath, true, pid);
         } catch (FileNotFoundException | InvalidExecutableException e) {
             // This means a translator executable cannot be found throw IOException
             throw new RemoteException("NameSpaceServer: translator executable not found", e);
@@ -259,7 +280,19 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
         return sb.toString();
     }
 
-    private Object lookupInternal(String path, RemainingPath remainingPath, boolean activateTranslators)
+    /**
+     * Lookup a name in the namespace. The name is hierarchical set of names separated with '/' characters.
+     *
+     * @param path the hierarchical name to lookup in the namespace
+     * @param remainingPath
+     * @param activateTranslators
+     * @param pid the process ID of the process calling lookup. 0 for Jinix kernel lookups.
+     * @return
+     * @throws FileNotFoundException
+     * @throws InvalidExecutableException
+     * @throws RemoteException
+     */
+    private Object lookupInternal(String path, RemainingPath remainingPath, boolean activateTranslators, int pid)
             throws FileNotFoundException, InvalidExecutableException, RemoteException {
 
         String parentPath = path;
@@ -268,7 +301,12 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
                 Object obj = namingOverlay.get(parentPath);
                 if (obj instanceof TranslatorDefinition) {
                     TranslatorDefinition td = (TranslatorDefinition) obj;
-                    if (td.remote == null && (!remainingPath.getPath().isEmpty() || activateTranslators)) {
+                    // We only want to start the translator if it has not been started (td.remote == null) and if the lookup
+                    // goes into the translator name space except when the translator is performing the lookup itself. We
+                    // allow a translator on top of a file system directory to see the directory contents even if the
+                    // translator is translating the contents for all other processes. Last call from translator bind and
+                    // unbind do not start a translator.
+                    if (td.remote == null && pid != td.pid && (!remainingPath.getPath().isEmpty() || activateTranslators)) {
                         try {
                             startTranslator(td); // startTranslator() will populate remote in the TranslatorDefinition
                         } catch (FileNotFoundException e) {
@@ -282,7 +320,14 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
                     if (remainingPath.getPath().isEmpty() && !activateTranslators) {
                         return obj; // this will be a translator. bindTranslator uses this value.
                     }
-                    obj = td.remote;
+                    if (pid != td.pid) {
+                        obj = td.remote;
+                    } else {
+                        // We only get here when the translator is looking up a name under the translators name. Put
+                        // the entire parentPath in the remainingPath and return
+                        remainingPath.setPath(parentPath + remainingPath.getPath());
+                        return null;
+                    }
                 }
                 if(remainingPath.getPath().isEmpty()) {
                     remainingPath.setPath("/");
@@ -290,7 +335,7 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
                 } else {
                     if (obj instanceof NameSpace) {
                         NameSpace subNameSpace = (NameSpace) obj;
-                        return subNameSpace.lookup(remainingPath.getPath());
+                        return subNameSpace.lookup(pid, remainingPath.getPath());
                     }
                     if (obj instanceof FileNameSpace) {
                         return obj;
@@ -377,6 +422,11 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
             }
         }
 
+        // This means that the translator failed to start.
+        if (td.remote == null) {
+            throw new RemoteException("Failure to start translator at: "+td.node);
+        }
+
         // If the translator is a FileNameSpace, add it to the list of sub namespaces.
         if (td.remote instanceof FileNameSpace) {
             subFileNameSpaceList.add((FileNameSpace) td.remote);
@@ -398,7 +448,7 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
     private static class TranslatorDefinition {
         String node;
         String command;
-        int pid; // PID is populated when the translator is activated
+        int pid = Integer.MIN_VALUE; // PID is populated when the translator is activated
         Remote remote; // Remote interface of the translator when the translator is activated
     }
 }

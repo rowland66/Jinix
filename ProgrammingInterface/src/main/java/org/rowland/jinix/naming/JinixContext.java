@@ -16,14 +16,11 @@ import java.util.Hashtable;
  */
 public class JinixContext implements Context {
 
-    NameSpace root;
-
     public JinixContext() {
-        root = JinixRuntime.getRuntime().getRootNamespace();
     }
 
     public JinixContext(NameSpace rootNameSpace) {
-        root = rootNameSpace;
+
     }
 
     @Override
@@ -37,12 +34,13 @@ public class JinixContext implements Context {
             name = "/"+name;
         }
         try {
-            LookupResult lookup = root.lookup(name);
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(name);
             if (lookup.remote instanceof FileNameSpace && !lookup.remainingPath.equals("/")) {
                 FileNameSpace fns = (FileNameSpace) lookup.remote;
                 if (!fns.exists(lookup.remainingPath)) {
                     throw new NameNotFoundException("No object bound at: " + name);
                 }
+
                 return fns.getRemoteFileAccessor(JinixRuntime.getRuntime().getPid(), lookup.remainingPath, EnumSet.noneOf(StandardOpenOption.class));
             } else {
                 return lookup.remote;
@@ -64,11 +62,7 @@ public class JinixContext implements Context {
         if (!(obj instanceof Remote)) {
             throw new IllegalArgumentException("Jinix only supports binding Remote objects");
         }
-        try {
-            root.bind(name, (Remote) obj);
-        } catch (RemoteException e) {
-            throw new RuntimeException(e);
-        }
+        JinixRuntime.getRuntime().bind(name, (Remote) obj);
     }
 
     @Override

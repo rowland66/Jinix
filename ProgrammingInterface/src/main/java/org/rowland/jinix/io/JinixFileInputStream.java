@@ -33,7 +33,7 @@ public class JinixFileInputStream extends InputStream {
     public JinixFileInputStream(JinixFile file) throws FileNotFoundException {
         try {
             int pid = JinixRuntime.getRuntime().getPid();
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(file.getCanonicalPath());
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(file.getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             fd = new JinixFileDescriptor(fns.getRemoteFileAccessor(pid, lookup.remainingPath, inputStreamOpenOptionSet));
             fd.attach(this);
@@ -71,7 +71,7 @@ public class JinixFileInputStream extends InputStream {
         try {
             byte[] b = fd.getHandle().read(JinixRuntime.getRuntime().getProcessGroupId(), 1);
             if (b != null && b.length == 1) {
-                return (int) b[0];
+                return b[0] & 0xff;  // This is the only way to convert a byte to an int with negative numbers for values over 128
             } else {
                 return -1;
             }

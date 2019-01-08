@@ -266,7 +266,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                     }
                     */
                 }
-            },"Exec Server Thread 1"+cmd)).start();
+            },"Exec Server Process Waiter: "+cmd)).start();
 
             // These 2 thread are not really needed, but are left in for easier debugging.
             Thread stdOutThread = new Thread(Thread.currentThread().getThreadGroup(), new Runnable() {public void run() {
@@ -280,7 +280,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
-            }},"Exec Server StdOut"+cmd);
+            }},"Exec Server StdOut: "+cmd);
             stdOutThread.start();
 
             Thread stdErrThread = new Thread(new Runnable() {public void run() {
@@ -294,7 +294,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
-            }},"Exec Server StdIn"+cmd);
+            }},"Exec Server StdIn: "+cmd);
             stdErrThread.start();
 
         } catch (IOException e) {

@@ -11,7 +11,7 @@ public class RuntimeAgentClassFileTransformerImpl implements ClassFileTransforme
     @Override
     public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) throws IllegalClassFormatException {
 
-        if(loader == null && className.equals("java/io/RandomAccessFile")) {
+        if(loader == null && (className.equals("java/io/RandomAccessFile") || className.equals("java/io/FileDescriptor"))) {
             return Arrays.copyOf(classfileBuffer, classfileBuffer.length);
         }
         return null;

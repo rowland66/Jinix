@@ -2,22 +2,31 @@ package org.rowland.jinix;
 
 import org.rowland.jinix.exec.ExecServer;
 import org.rowland.jinix.exec.InvalidExecutableException;
+import org.rowland.jinix.io.JinixFile;
 import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixFileOutputStream;
 import org.rowland.jinix.io.JinixFileInputStream;
 import org.rowland.jinix.lang.JinixRuntime;
+import org.rowland.jinix.naming.FileNameSpace;
+import org.rowland.jinix.naming.LookupResult;
 import org.rowland.jinix.naming.NameSpace;
+import org.rowland.jinix.naming.RemoteFileAccessor;
 import org.rowland.jinix.proc.ProcessManager;
 import org.rowland.jinix.terminal.LocalMode;
 import org.rowland.jinix.terminal.TermServer;
 import org.rowland.jinix.terminal.TerminalAttributes;
 
 import java.io.*;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.StandardOpenOption;
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.RMISocketFactory;
+import java.util.EnumSet;
+import java.util.Properties;
 
 /**
  * A simple Console for Jinix. The Console access the TerminalServer to create a terminal, and then accesses
@@ -46,11 +55,38 @@ public class Console {
             ProcessManager pm = (ProcessManager) fs.lookup(ProcessManager.SERVER_NAME).remote;
 
             //"-Xdebug","-Xrunjdwp:transport=dt_socket,address=5555,server=y,suspend=y",
+            RemoteFileAccessor environmentRaf = null;
+            try {
+                EnumSet<StandardOpenOption> openOptions = EnumSet.of(StandardOpenOption.READ);
+                NameSpace remoteRootNameSpace = (NameSpace) getRegistry().lookup("root");
+                LookupResult lookup = remoteRootNameSpace.lookup("/config/environment.config");
+                FileNameSpace fns = (FileNameSpace) lookup.remote;
+                environmentRaf = fns.getRemoteFileAccessor(-1, lookup.remainingPath, openOptions);
+            } catch (FileAlreadyExistsException e) {
+                // Should never happen as we are not using CREATE_NEW
+            } catch (NoSuchFileException e) {
+                System.err.println("Console: No file found at /config/environment.config");
+            } catch (NotBoundException e) {
+                System.err.println("Console: Failed to find root namespace in RMI registry.");
+                System.exit(0);
+            } catch (RemoteException e) {
+                System.err.println("Console: RemoteException");
+                e.getCause().printStackTrace(System.err);
+                System.exit(1);
+            }
+
+            Properties envProps = new Properties();
+            try (Reader environmentFileReader = new BufferedReader(new InputStreamReader(new JinixFileInputStream(new JinixFileDescriptor(environmentRaf))))) {
+                envProps.load(environmentFileReader);
+            } catch (IOException e) {
+                throw new RuntimeException("IOException loading /etc/environment.config", e);
+            }
+
             try {
                 slaveFileDescriptor.getHandle().duplicate(); // We need to dup the slave RemoteFileAccessor twice because we are
                 slaveFileDescriptor.getHandle().duplicate(); // passing 3 slave FileChannels, and ExecLauncher will close all three
 
-                int pid = es.exec(null, "/bin/jsh.jar", new String[]{"-Xdebug","-Xrunjdwp:transport=dt_socket,address=5559,server=y,suspend=n","/home"}, 1, -1, -1,
+                int pid = es.exec(envProps, "/bin/jsh.jar", new String[]{/**"-Xdebug","-Xrunjdwp:transport=dt_socket,address=5559,server=y,suspend=n",*/"/home"}, 1, -1, -1,
                         slaveFileDescriptor.getHandle(), slaveFileDescriptor.getHandle(), slaveFileDescriptor.getHandle());
 
                 pm.setProcessTerminalId(pid, terminalId);

@@ -64,7 +64,16 @@ public interface ProcessManager extends Remote {
 
     ProcessData[] getProcessData() throws RemoteException;
 
+    /**
+     * Get an array of ProcessData for all processes ordered by the process group ID.
+     * @return an array of ProcessData
+     * @throws RemoteException
+     */
+    ProcessData[] getProcessDataByProcessGroup() throws RemoteException;
+
     ChildEvent waitForChild(int pid, boolean nowait) throws RemoteException;
+
+    ChildEvent waitForChild(int pid, int childPid, boolean nowait) throws RemoteException;
 
     void registerEventNotificationHandler(int pid, EventName eventName, EventNotificationHandler handler) throws RemoteException;
 

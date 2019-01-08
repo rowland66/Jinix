@@ -46,6 +46,8 @@ public interface FileNameSpace extends Remote {
     void move(String nameFrom, String pathNameTo, CopyOption... options)
             throws NoSuchFileException, FileAlreadyExistsException, UnsupportedOperationException, RemoteException;
 
+    LookupResult lookup(int pid, String name);
+
     RemoteFileAccessor getRemoteFileAccessor(int pid, String name, Set<? extends OpenOption> options) throws FileAlreadyExistsException, NoSuchFileException, RemoteException;
 
     Object getKey(String name) throws RemoteException;

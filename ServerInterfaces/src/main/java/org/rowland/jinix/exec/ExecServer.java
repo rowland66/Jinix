@@ -8,7 +8,7 @@ import java.rmi.RemoteException;
 import java.util.Properties;
 
 /**
- * Jinix server that executes Jinix executable files (executable jars).
+ * Jinix server that executes Jinix executable files (executable jars). The ExecServer
  */
 public interface ExecServer extends Remote {
 
@@ -24,7 +24,7 @@ public interface ExecServer extends Remote {
     /**
      * Execute
      * ExecLauncher in a new operating system process and
-     * @param env
+     * @param env the system properties that will be available to the
      * @param cmd the name of the command to execute
      * @param args
      * @param parentId the process ID of the current process, or 0 if the process has no parent.

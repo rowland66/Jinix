@@ -41,7 +41,7 @@ public class JinixFileOutputStream extends OutputStream {
             }
 
             int pid = JinixRuntime.getRuntime().getPid();
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(file.getCanonicalPath());
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(file.getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             fd = new JinixFileDescriptor(fns.getRemoteFileAccessor(pid, lookup.remainingPath, options));
         } catch (NoSuchFileException | FileAlreadyExistsException e) {

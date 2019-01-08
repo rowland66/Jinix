@@ -43,6 +43,7 @@ public class JinixRandomAccessFile {
         else if (mode.startsWith("rw")) {
             options.add(StandardOpenOption.READ);
             options.add(StandardOpenOption.WRITE);
+            options.add(StandardOpenOption.CREATE);
             if (mode.length() > 2) {
                 if (mode.equals("rws"))
                     options.add(StandardOpenOption.SYNC);
@@ -66,7 +67,7 @@ public class JinixRandomAccessFile {
 
         try {
             int pid = JinixRuntime.getRuntime().getPid();
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(file.getCanonicalPath());
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(file.getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             fd = new JinixFileDescriptor(fns.getRemoteFileAccessor(pid, lookup.remainingPath, options));
         } catch (NoSuchFileException | FileAlreadyExistsException e) {
@@ -123,7 +124,12 @@ public class JinixRandomAccessFile {
     public int read() throws IOException {
         try {
             byte[] b = fd.getHandle().read(JinixRuntime.getRuntime().getProcessGroupId(), 1);
-            return (int) b[0];
+
+            if (b == null) {
+                return -1;
+            }
+
+            return b[0] & 0xff;
         } catch (NonReadableChannelException e) {
             throw new IOException("Illegal attempt to read from a non-readable file descriptor");
         } catch (NoSuchObjectException e) {

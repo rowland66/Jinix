@@ -33,7 +33,20 @@ public interface NameSpace extends java.rmi.Remote {
 
     void unbindTranslator(String path, EnumSet<BindTranslatorOption> options) throws RemoteException;
 
+    /**
+     * Lookup from within the Jinix kernel where a pid is not available. This method will simply call the other
+     * lookup with pid value of 0. This method is not to be used outside of the kernel.
+     *
+     * @param path the hierarchical name to lookup
+     * @return
+     * @throws RemoteException
+     */
+
     LookupResult lookup(String path) throws RemoteException;
 
+    LookupResult lookup(int pid, String path) throws RemoteException;
+
     List<FileAccessorStatistics> getOpenFiles(int pid) throws RemoteException;
+
+    void translatorFailure(String path) throws RemoteException;
 }

@@ -191,12 +191,12 @@ public class JinixFileChannel extends FileChannel {
 
     @Override
     public FileLock lock(long position, long size, boolean shared) throws IOException {
-        return null;
+        return new JinixFileLockImpl(this, position, size, shared);
     }
 
     @Override
     public FileLock tryLock(long position, long size, boolean shared) throws IOException {
-        return null;
+        return new JinixFileLockImpl(this, position, size, shared);
     }
 
     @Override

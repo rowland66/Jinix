@@ -5,12 +5,14 @@ import org.rowland.jinix.exec.InvalidExecutableException;
 import org.rowland.jinix.fifo.FileChannelPair;
 import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixPipe;
+import org.rowland.jinix.naming.LookupResult;
 import org.rowland.jinix.naming.NameSpace;
 import org.rowland.jinix.proc.ProcessManager;
 import org.rowland.jinix.terminal.TerminalAttributes;
 
 import javax.naming.Context;
 import java.io.FileNotFoundException;
+import java.nio.file.Path;
 import java.rmi.Remote;
 import java.util.Properties;
 
@@ -57,12 +59,16 @@ public abstract class JinixRuntime {
     }
 
     /**
-     * Get the Jinix system's root NameSpace. All resources in a Jinix system are located through
+     * Lookup an object in the
      * the root NameSpace.
      *
-     * @return the root NameSpace
+     * @return a LookupResult
      */
-    public abstract NameSpace getRootNamespace();
+    public abstract LookupResult lookup(String path);
+
+    public abstract void bind(String path, Object obj);
+
+    public abstract void unbind(String path);
 
     /**
      * Get the Jinix systems root NameSpace wrapped in javax.naming.Context interface.
@@ -180,6 +186,16 @@ public abstract class JinixRuntime {
     public abstract ProcessManager.ChildEvent waitForChild(boolean nowait);
 
     /**
+     * Block the thread that calls this method until a particular child process is stopped or terminates.
+     * If no child process exists, returns -1.
+     *
+     * @param pid the id of the child process to wait for
+     * @param nowait true if call should check for and return a pending ChildEvents, but not wait
+     * @return the pid of the child process that triggered the return, or -1 if no child processes exist
+     */
+    public abstract ProcessManager.ChildEvent waitForChild(int pid, boolean nowait);
+
+    /**
      * Get a Jinix file descriptor for one of the standard process files (IN, OUT and ERROR).
      *
      * @param sfd
@@ -286,4 +302,6 @@ public abstract class JinixRuntime {
     public abstract void setTerminalAttributes(short terminalId, TerminalAttributes terminalAttributes);
 
     public abstract void exit(int status);
+
+    public abstract void addLibraryToClassloader(String jarFile);
 }

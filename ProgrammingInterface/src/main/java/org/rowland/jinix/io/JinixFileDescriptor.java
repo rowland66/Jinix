@@ -5,9 +5,11 @@ import org.rowland.jinix.naming.RemoteFileAccessor;
 import java.io.Closeable;
 import java.io.FileDescriptor;
 import java.io.IOException;
+import java.io.SyncFailedException;
 import java.rmi.NoSuchObjectException;
 import java.rmi.RemoteException;
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 
 /**
@@ -15,9 +17,7 @@ import java.util.List;
  */
 public class JinixFileDescriptor extends FileDescriptor {
 
-    public static List<JinixFileDescriptor> openFileDescriptors = new ArrayList<JinixFileDescriptor>();
-
-    public static Object blockedTerminalOperationSynchronizationObject = new Object();
+    public static List<JinixFileDescriptor> openFileDescriptors = new LinkedList<JinixFileDescriptor>();
 
     RemoteFileAccessor handle;
     private Closeable parent;
@@ -35,6 +35,16 @@ public class JinixFileDescriptor extends FileDescriptor {
 
     public RemoteFileAccessor getHandle() {
         return handle;
+    }
+
+    public void sync() throws SyncFailedException {
+        try {
+            if (handle != null) {
+                handle.force(false);
+            }
+        } catch (RemoteException e) {
+            throw new RuntimeException("Internal error", e.getCause());
+        }
     }
 
     synchronized void attach(Closeable c) {

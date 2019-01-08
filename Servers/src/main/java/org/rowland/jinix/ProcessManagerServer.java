@@ -36,8 +36,8 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
     ProcessManagerServer(NameSpace rootNameSpace) throws RemoteException {
         super();
         ns = rootNameSpace;
-        processMap = new HashMap<>();
-        processGroupMap = new HashMap<>();
+        processMap = new TreeMap<>();
+        processGroupMap = new TreeMap<>();
         globalEventHandlers = new HashMap<>();
         startUpTime = System.currentTimeMillis();
         state = State.RUNNING;
@@ -58,62 +58,62 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
     public synchronized RegisterResult registerProcess(int parentId, int processGroupId, int sessionId, String cmd, String[] args)
             throws RemoteException {
 
-        if (state == State.STOPPING || state == State.SHUTDOWN) {
+        synchronized (processMap) {
+            if (state == State.STOPPING || state == State.SHUTDOWN) {
+                RegisterResult rtrn = new RegisterResult();
+                rtrn.pid = -1;
+                rtrn.pgid = -1;
+                return rtrn;
+            }
 
-        }
+            Proc parentProc = null;
+            if (parentId > 0) {
+                parentProc = processMap.get(parentId);
+                if (parentProc == null) {
+                    throw new RemoteException("Invalid parent pid: " + parentId);
+                }
 
-        Proc parentProc = null;
-        if (parentId > 0) {
-            parentProc = processMap.get(parentId);
-            if (parentProc == null) {
-                throw new RemoteException("Invalid parent pid: " + parentId);
+                if (processGroupId == 0) {
+                    processGroupId = parentProc.processGroup;
+                }
+
+                if (sessionId == 0) {
+                    sessionId = parentProc.sessionId;
+                }
             }
 
             if (processGroupId == 0) {
-                processGroupId = parentProc.processGroup;
+                throw new RemoteException("Invalid call processGroupId = 0 and parentId = 0");
             }
 
             if (sessionId == 0) {
-                sessionId = parentProc.sessionId;
+                throw new RemoteException("Invalid call sessionId = 0 and parentId = 0");
             }
-        }
 
-        if (processGroupId == 0) {
-            throw new RemoteException("Invalid call processGroupId = 0 and parentId = 0");
-        }
+            Proc p = new Proc();
+            p.id = nextId.getAndIncrement();
+            p.parentId = parentId;
+            p.processGroup = (processGroupId == -1 ? p.id : processGroupId);
+            p.terminal = (parentProc != null ? parentProc.terminal : -1);
+            p.sessionId = (sessionId == -1 ? p.id : sessionId);
+            p.state = ProcessState.STARTING;
+            p.cmd = cmd;
+            p.args = args;
+            p.startTime = System.currentTimeMillis();
+            p.isZombie = false;
 
-        if (sessionId == 0) {
-            throw new RemoteException("Invalid call sessionId = 0 and parentId = 0");
-        }
-
-        Proc p = new Proc();
-        p.id = nextId.getAndIncrement();
-        p.parentId = parentId;
-        p.processGroup = (processGroupId == -1 ? p.id : processGroupId);
-        p.terminal = (parentProc != null ? parentProc.terminal : -1);
-        p.sessionId = (sessionId == -1 ? p.id : sessionId);
-        p.state = ProcessState.STARTING;
-        p.cmd = cmd;
-        p.args = args;
-        p.startTime = System.currentTimeMillis();
-        p.isZombie = false;
-
-        // Processes with parentId == 0 are group leaders and have no parent.
-        if (parentProc != null) {
-
-            synchronized (parentProc.children) {
+            // Processes with parentId == 0 are group leaders and have no parent.
+            if (parentProc != null) {
                 parentProc.children.add(p);
             }
-        }
 
-        p.children = new LinkedList<Proc>();
+            p.children = new LinkedList<Proc>();
 
-        p.eventWaiters = new HashMap<>(16);
-        p.eventHandlers = new HashMap<>(16);
+            p.eventWaiters = new HashMap<>(16);
+            p.eventHandlers = new HashMap<>(16);
 
-        p.pendingSignals = new LinkedList<>();
+            p.pendingSignals = new LinkedList<>();
 
-        synchronized (processMap) {
             processMap.put(Integer.valueOf(p.id), p);
             if (p.id == p.processGroup) {
                 List<Proc> processGroupList = new LinkedList<>();
@@ -125,13 +125,13 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
                     processGroupList.add(p);
                 }
             }
+
+            RegisterResult rtrn = new RegisterResult();
+            rtrn.pid = p.id;
+            rtrn.pgid = p.processGroup;
+
+            return rtrn;
         }
-
-        RegisterResult rtrn = new RegisterResult();
-        rtrn.pid = p.id;
-        rtrn.pgid = p.processGroup;
-
-        return rtrn;
     }
 
     /**
@@ -147,75 +147,86 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
      */
     @Override
     public synchronized void deRegisterProcess(int id, int exitStatus) {
-        Proc p = processMap.get(id);
 
-        if (p == null) {
-            throw new IllegalArgumentException("Call to deRegisterProcess with unknown pid: "+id);
-        }
+        synchronized (processMap) {
+            Proc p = processMap.get(id);
 
-        EventData data = new EventData();
-        data.pid = p.id;
-        data.sessionId = p.sessionId;
-        data.terminalId = p.terminal;
-        triggerProcessEvent(p, EventName.DEREGISTER, data);
-        triggerGlobalEvent(EventName.DEREGISTER, data);
+            if (p == null) {
+                throw new IllegalArgumentException("Call to deRegisterProcess with unknown pid: " + id);
+            }
 
-        // If a thread in the terminating process is listening for signals, notify it so that it won't hang the kernel on shutdown
-        synchronized(p.pendingSignals) {
-            p.pendingSignals.notifyAll();
-        }
+            EventData data = new EventData();
+            data.pid = p.id;
+            data.sessionId = p.sessionId;
+            data.terminalId = p.terminal;
+            triggerProcessEvent(p, EventName.DEREGISTER, data);
+            triggerGlobalEvent(EventName.DEREGISTER, data);
 
-        // The only process with parent id 0 is init. If init is shutting down, then shutdown the kernel.
-        if (p.parentId == 0) {
+            // If a thread in the terminating process is listening for signals, notify it so that it won't hang the kernel on shutdown
+            synchronized (p.pendingSignals) {
+                p.pendingSignals.notifyAll();
+            }
 
-        }
+            // If the process is a daemon (child of init at pid 1) clean it up and return as init does not listen for children.
+            /*
+            if (p.parentId == 1) {
+                synchronized (processMap) {
+                    List<Proc> processGroupList = processGroupMap.get(p.processGroup);
+                    synchronized (processGroupList) {
+                        processGroupList.remove(p);
+                        if (processGroupList.isEmpty()) {
+                            processGroupMap.remove(p.processGroup);
+                        }
+                    }
+                    processMap.remove(id);
+                    return;
+                }
+            }
+            */
 
-        // If the process is a daemon (child of init at pid 1) clean it up and return as init does not listen for children.
-        /*
-        if (p.parentId == 1) {
-            synchronized (processMap) {
-                List<Proc> processGroupList = processGroupMap.get(p.processGroup);
-                synchronized (processGroupList) {
+            // The only process with parent id 0 is init. If init is shutting down, then shutdown the kernel.
+            if (p.parentId == 0) {
+                processGroupMap.remove(p.processGroup);
+                processMap.remove(p.id);
+                state = State.SHUTDOWN;
+            } else {
+                p.state = ProcessState.SHUTDOWN;
+                p.isZombie = true;
+                p.exitStatus = exitStatus;
+
+                enqueueParentEventWaiters(p);
+
+                // Any children of the process being deregistered become children of init. They are daemons.
+                if (!p.children.isEmpty()) {
+                    Proc initProc = processMap.get(1);
+                    for (Proc child : p.children) {
+                        child.parentId = 1;
+                        synchronized (initProc.children) {
+                            initProc.children.add(child);
+                        }
+                    }
+                }
+
+                Proc parent = processMap.get(p.parentId);
+
+                synchronized (processGroupMap) {
+                    List<Proc> processGroupList = processGroupMap.get(p.processGroup);
                     processGroupList.remove(p);
                     if (processGroupList.isEmpty()) {
                         processGroupMap.remove(p.processGroup);
                     }
                 }
+
                 processMap.remove(id);
-                return;
-            }
-        }
-        */
 
-        p.state = ProcessState.SHUTDOWN;
-        p.isZombie = true;
-        p.exitStatus = exitStatus;
-
-        enqueueParentEventWaiters(p);
-
-        // Any children of the process being deregistered become children of init. They are daemons.
-        if (!p.children.isEmpty()) {
-            Proc initProc = processMap.get(1);
-            for (Proc child : p.children) {
-                child.parentId = 1;
-                synchronized (initProc.children) {
-                    initProc.children.add(child);
+                if (parent != null) {
+                    parent.children.remove(p);
                 }
             }
         }
 
-        Proc parent = processMap.get(p.parentId);
-
-        synchronized (processMap) {
-            List<Proc> processGroupList = processGroupMap.get(p.processGroup);
-            synchronized (processGroupList) {
-                processGroupList.remove(p);
-                if (processGroupList.isEmpty()) {
-                    processGroupMap.remove(p.processGroup);
-                }
-            }
-            processMap.remove(id);
-            parent.children.remove(p);
+        if (processMap.isEmpty()) {
+            System.exit(0);
         }
     }
 
@@ -232,20 +243,22 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
             throw new IllegalArgumentException("Call to updateProcessState() with unknown pid: "+id);
         }
 
-        ProcessState oldState = p.state;
-        p.state = state;
+        synchronized (p) {
+            ProcessState oldState = p.state;
+            p.state = state;
 
-        if (oldState == ProcessState.RUNNING && p.state == ProcessState.SUSPENDED) {
-            enqueueParentEventWaiters(p);
-        }
+            if (oldState == ProcessState.RUNNING && p.state == ProcessState.SUSPENDED) {
+                enqueueParentEventWaiters(p);
+            }
 
-        if (oldState == ProcessState.SUSPENDED && p.state == ProcessState.RUNNING) {
-            EventData eventData = new EventData();
-            eventData.pid = p.id;
-            eventData.pgid = p.processGroup;
-            eventData.sessionId = p.sessionId;
-            eventData.terminalId = p.terminal;
-            triggerGlobalEvent(EventName.RESUME, eventData);
+            if (oldState == ProcessState.SUSPENDED && p.state == ProcessState.RUNNING) {
+                EventData eventData = new EventData();
+                eventData.pid = p.id;
+                eventData.pgid = p.processGroup;
+                eventData.sessionId = p.sessionId;
+                eventData.terminalId = p.terminal;
+                triggerGlobalEvent(EventName.RESUME, eventData);
+            }
         }
 
         // The SHUTDOWN state is handled by deRegisterProcess.
@@ -313,6 +326,28 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
         return rtrn;
     }
 
+    @Override
+    public ProcessData[] getProcessDataByProcessGroup() throws RemoteException {
+        ProcessData[] rtrn = new ProcessData[processMap.size()];
+        int cnt = 0;
+        for (List<Proc> procList : processGroupMap.values()) {
+            for (Proc proc : procList) {
+                ProcessData pd = new ProcessData();
+                pd.id = proc.id;
+                pd.parentId = (proc.parentId);
+                pd.processGroupId = proc.processGroup;
+                pd.sessionId = proc.sessionId;
+                pd.terminalId = proc.terminal;
+                pd.startTime = proc.startTime;
+                pd.state = proc.state;
+                pd.cmd = proc.cmd;
+                pd.args = proc.args;
+                rtrn[cnt++] = pd;
+            }
+        }
+        return rtrn;
+    }
+
     /**
      * Wait for a child process of the pid to terminate.
      *
@@ -360,6 +395,19 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
     }
 
     /**
+     * Wait for a particular child process of the pid to terminate.
+     *
+     * @param pid process Id of the parent process.
+     * @param childPid process Id of the child process to wait for.
+     * @return a ChildEvent with information about the status and disposition of the child process
+     * @throws RemoteException
+     */
+    @Override
+    public ChildEvent waitForChild(int pid, int childPid, boolean nowait) throws RemoteException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
      * Register an interest in event notifications with a given name for a process.
      *
      * @param pid
@@ -376,7 +424,9 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
             return;
         }
 
-        if (p.isZombie) return;
+        if (p.isZombie) {
+            return;
+        }
 
         if (p.eventHandlers.containsKey(eventName)) {
             p.eventHandlers.get(eventName).add(handler);
@@ -439,6 +489,7 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
         }
 
         synchronized (p.pendingSignals) {
+            logger.fine("Send signal "+signal+" to pid "+pid);
             p.pendingSignals.addLast(signal);
             p.pendingSignals.notify();
         }
@@ -485,7 +536,9 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
             logger.fine("listen for signal exiting: " + pid);
 
             if (!p.pendingSignals.isEmpty()) {
-                return p.pendingSignals.removeFirst();
+                Signal rtrnSignal = p.pendingSignals.removeFirst();
+                logger.fine("PID "+pid+" received signal "+rtrnSignal);
+                return rtrnSignal;
             } else {
                 return null;
             }
@@ -501,48 +554,46 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
 
         Proc p = processMap.get(pid);
 
-        if (p.processGroup == p.id) {
-            throw new IllegalOperationException("Process group leader cannot move to another process group");
-        }
-
-        if (processGroupId > 1) {
-            Proc processGroupLeader = processMap.get(processGroupId);
-            if (processGroupLeader == null || p.sessionId != processGroupLeader.sessionId) {
-                throw new IllegalOperationException("Process cannot be moved to a process group in a different session");
+        synchronized (p) {
+            if (p.processGroup == p.id) {
+                throw new IllegalOperationException("Process group leader cannot move to another process group");
             }
-        }
 
-        if (processGroupId == -1) {
-            p.processGroup = p.id;
-            return p.processGroup;
-        }
+            if (processGroupId > 1) {
+                Proc processGroupLeader = processMap.get(processGroupId);
+                if (processGroupLeader == null || p.sessionId != processGroupLeader.sessionId) {
+                    throw new IllegalOperationException("Process cannot be moved to a process group in a different session");
+                }
+            }
 
-        synchronized (processMap) {
-            List<Proc> processGroupList = processGroupMap.get(p.processGroup);
-            synchronized (processGroupList) {
+            if (processGroupId == -1) {
+                p.processGroup = p.id;
+                return p.processGroup;
+            }
+
+            synchronized (processGroupMap) {
+                List<Proc> processGroupList = processGroupMap.get(p.processGroup);
                 processGroupList.remove(p);
                 if (processGroupList.isEmpty()) {
                     processGroupMap.remove(p.processGroup);
                 }
-            }
-        }
 
-        p.processGroup = processGroupId;
+                p.processGroup = processGroupId;
 
-        synchronized (processMap) {
-            if (p.id == p.processGroup) {
-                List<Proc> processGroupList = new LinkedList<>();
-                processGroupList.add(p);
-                processGroupMap.put(p.processGroup, processGroupList);
-            } else {
-                List<Proc> processGroupList = processGroupMap.get(p.processGroup);
-                synchronized (processGroupList) {
+                if (p.id == p.processGroup) {
+                    processGroupList = new LinkedList<>();
                     processGroupList.add(p);
+                    processGroupMap.put(p.processGroup, processGroupList);
+                } else {
+                    processGroupList = processGroupMap.get(p.processGroup);
+                    synchronized (processGroupList) {
+                        processGroupList.add(p);
+                    }
                 }
             }
-        }
 
-        return p.processGroup;
+            return p.processGroup;
+        }
     }
 
     @Override
@@ -560,36 +611,39 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
 
         Proc p = processMap.get(pid);
 
-        if (p == null) throw new IllegalArgumentException("ProcessManager: Unknown pid: "+pid);
+        if (p == null) throw new IllegalArgumentException("ProcessManager: Unknown pid: " + pid);
 
-        if (p.id == p.processGroup) {
-            throw new IllegalOperationException("Session cannot be changed for process group leader");
-        }
+        synchronized (p) {
 
-        p.sessionId = p.id;
+            if (p.id == p.processGroup) {
+                throw new IllegalOperationException("Session cannot be changed for process group leader");
+            }
 
-        synchronized (processMap) {
-            List<Proc> processGroupList = processGroupMap.get(p.processGroup);
-            synchronized (processGroupList) {
-                processGroupList.remove(p);
-                if (processGroupList.isEmpty()) {
-                    processGroupMap.remove(p.processGroup);
+            p.sessionId = p.id;
+
+            synchronized (processGroupMap) {
+                List<Proc> processGroupList = processGroupMap.get(p.processGroup);
+                synchronized (processGroupList) {
+                    processGroupList.remove(p);
+                    if (processGroupList.isEmpty()) {
+                        processGroupMap.remove(p.processGroup);
+                    }
                 }
             }
+
+            p.processGroup = p.id;
+
+            synchronized (processMap) {
+                List<Proc> processGroupList = new LinkedList<>();
+                processGroupList.add(p);
+                processGroupMap.put(p.processGroup, processGroupList);
+            }
+
+            // POSIX says we should do this, but until a process can acquire a terminal it creates a race condition.
+            //p.terminal = -1;
+
+            return p.processGroup;
         }
-
-        p.processGroup = p.id;
-
-        synchronized (processMap) {
-            List<Proc> processGroupList = new LinkedList<>();
-            processGroupList.add(p);
-            processGroupMap.put(p.processGroup, processGroupList);
-        }
-
-        // POSIX says we should do this, but until a process can acquire a terminal it creates a race condition.
-        //p.terminal = -1;
-
-        return p.processGroup;
     }
 
     @Override
@@ -598,12 +652,14 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
 
         if (p == null) throw new IllegalArgumentException("ProcessManager: Unknown pid: "+pid);
 
-        // Once the terminal ID is set, it cannot be changed to any value other than -1
-        if (p.terminal != -1 && terminalId != -1) {
-            return;
-        }
+        synchronized (p) {
+            // Once the terminal ID is set, it cannot be changed to any value other than -1
+            if (p.terminal != -1 && terminalId != -1) {
+                return;
+            }
 
-        p.terminal = terminalId;
+            p.terminal = terminalId;
+        }
     }
 
     @Override
@@ -971,35 +1027,6 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
     private enum ComponentEnum {
         CMDLINE, CWD, EXE, FILES, FILEINFO
     }
-    /**
-     * Shutdown the ProcessManager. To cleanly shutdown, first shutdown all process groups by identifying
-     * processes with parentId 0. Shutdown the groups from process tree leaf back to root (recursive).
-     * Next showdown all translators by identifying processes with parentId -1.
-     */
-    void shutdown() {
-        state = State.STOPPING;
-        List<Integer> processGroupList = new LinkedList<Integer>();
-        List<Integer> translatorList = new LinkedList<Integer>();
-        for (Map.Entry<Integer, Proc> procMapEntry : processMap.entrySet()) {
-            if (procMapEntry.getValue().parentId == 0) {
-                processGroupList.add(procMapEntry.getValue().id);
-            }
-            if (procMapEntry.getValue().parentId == -1) {
-                translatorList.add(procMapEntry.getValue().id);
-            }
-        }
-
-        for (Integer id : processGroupList) {
-            killProcessGroup(id);
-        }
-
-        for (Integer id : translatorList) {
-            killProcessGroup(id);
-        }
-
-
-        state = State.SHUTDOWN;
-    }
 
     private void killProcessGroup(int id) {
         List<Integer> childList = new LinkedList<Integer>();
@@ -1057,6 +1084,7 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
 
     private static class ChildWaitObject {
         int waiterCount; // the number of waiters for this child event
+        int childPid = -1; // the
         Deque<Proc> processList = new LinkedList<>(); // a list of processes that have triggered a child Event
     }
 

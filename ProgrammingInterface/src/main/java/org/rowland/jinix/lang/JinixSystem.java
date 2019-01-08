@@ -9,12 +9,8 @@ import java.util.Properties;
  */
 public class JinixSystem {
 
-    private static Properties jinixProps;
+    private static Properties jinixProps = new Properties();
     private static List<String> jinixPropOverrides = new ArrayList<String>(20);
-
-    static {
-        jinixProps = new Properties();
-    }
 
     public static Properties getJinixProperties() {
         return jinixProps;

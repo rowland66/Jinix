@@ -27,7 +27,7 @@ public class JinixFile {
         if (pathname == null) {
             this.path = "";
         }
-        this.path = pathname;
+        this.path = fixPath(pathname);
     }
 
     public JinixFile(String parent, String child) {
@@ -38,12 +38,12 @@ public class JinixFile {
         String path;
         if (parent != null) {
             if (parent.equals("")) {
-                path = child;
+                path = fixPath(child);
             } else {
-                path = resolve(parent, child);
+                path = resolve(parent, fixPath(child));
             }
         } else {
-            path = child;
+            path = fixPath(child);
         }
 
         this.path = path;
@@ -75,7 +75,7 @@ public class JinixFile {
             path = path.substring(0, path.length() - 1);
         }
 
-        this.path = path;
+        this.path = fixPath(path);
     }
 
     public JinixFile(JinixFile parent, String child) {
@@ -86,15 +86,15 @@ public class JinixFile {
         String path;
         if (parent != null) {
             if (parent.path.equals("")) {
-                path = child;
+                path = fixPath(child);
             } else {
-                path = resolve(parent.path, child);
+                path = resolve(parent.path, fixPath(child));
             }
         } else {
-            path = child;
+            path = fixPath(child);
         }
 
-        this.path = path;
+        this.path = fixPath(path);
     }
 
     public String getName() {
@@ -192,7 +192,7 @@ public class JinixFile {
 
         try {
             try {
-                LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(getCanonicalPath());
+                LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
                 if (!(lookup.remote instanceof FileNameSpace)) {
                     return false;
                 }
@@ -209,7 +209,7 @@ public class JinixFile {
     public boolean isDirectory() {
 
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(getCanonicalPath());
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             return new JinixFileAttributes(
                     fns.getFileAttributes(lookup.remainingPath)).isDirectory();
@@ -224,7 +224,7 @@ public class JinixFile {
     public boolean isFile() {
 
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(getCanonicalPath());
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             return new JinixFileAttributes(
                     fns.getFileAttributes(lookup.remainingPath)).isRegularFile();
@@ -239,7 +239,7 @@ public class JinixFile {
     public long lastModified() {
 
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(getCanonicalPath());
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             return new JinixFileAttributes(fns.getFileAttributes(
                             lookup.remainingPath)).lastModifiedTime().toMillis();
@@ -257,7 +257,7 @@ public class JinixFile {
             }
             DirectoryFileData dfd = new DirectoryFileData();
             dfd.lastModified = time;
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(getCanonicalPath());
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             fns.setFileAttributes(lookup.remainingPath, dfd);
             return true;
@@ -271,7 +271,7 @@ public class JinixFile {
     public long length() {
 
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(getCanonicalPath());
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             return new JinixFileAttributes(fns.getFileAttributes(lookup.remainingPath)).size();
         } catch (NoSuchFileException e) {
@@ -283,7 +283,7 @@ public class JinixFile {
 
     public boolean delete() {
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(getCanonicalPath());
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             fns.delete(lookup.remainingPath);
             return true;
@@ -299,11 +299,9 @@ public class JinixFile {
             @Override
             public String[] run() {
                 try {
-                    LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(getCanonicalPath());
+                    LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
                     FileNameSpace fns = (FileNameSpace) lookup.remote;
                     return fns.list(lookup.remainingPath);
-                } catch (NotDirectoryException e) {
-                    return null;
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
@@ -314,7 +312,7 @@ public class JinixFile {
     public JinixFile[] listFiles() {
 
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(getCanonicalPath());
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             DirectoryFileData[] dirData = fns.listDirectoryFileData(lookup.remainingPath);
 
@@ -330,14 +328,14 @@ public class JinixFile {
     }
 
     public boolean createNewFile() throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(getCanonicalPath());
+        LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
         FileNameSpace fns = (FileNameSpace) lookup.remote;
         return fns.createFileAtomically(lookup.remainingPath);
     }
 
     public boolean mkdir() {
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(getCanonicalPath());
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             fns.createDirectory(lookup.remainingPath);
             return true;
@@ -350,7 +348,7 @@ public class JinixFile {
 
     public boolean mkdirs() {
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(getCanonicalPath());
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             fns.createDirectories(lookup.remainingPath);
             return true;
@@ -363,7 +361,7 @@ public class JinixFile {
 
     public boolean renameTo(JinixFile dest) {
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(getCanonicalPath());
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             fns.move(lookup.remainingPath, dest.getAbsolutePath());
             return true;
@@ -562,6 +560,9 @@ public class JinixFile {
         return result;
     }
 
+    private String fixPath(String path) {
+        return path.replace('\\', '/');
+    }
     public static void main(String[] args) {
         JinixFile j = new JinixFile("./Test.java");
         System.out.println(j.getPath());

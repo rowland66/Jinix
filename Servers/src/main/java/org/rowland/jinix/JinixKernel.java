@@ -117,20 +117,20 @@ public class JinixKernel {
                 @Override
                 public void run() {
                     if (!shutdown) {
-                        shutdown();
+                        shutdownFromShutdownHook();
                     }
                 }
             }));
 
             mainThread = Thread.currentThread();
 
-            RemoteFileAccessor raf = null;
+            RemoteFileAccessor initLogRaf = null;
             try {
                 EnumSet<StandardOpenOption> openOptions = EnumSet.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
                 NameSpace remoteRootNameSpace = (NameSpace) getRegistry().lookup("root");
                 LookupResult lookup = remoteRootNameSpace.lookup("/var/log/init.log");
                 FileNameSpace fns = (FileNameSpace) lookup.remote;
-                raf = fns.getRemoteFileAccessor(-1, lookup.remainingPath, openOptions);
+                initLogRaf = fns.getRemoteFileAccessor(-1, lookup.remainingPath, openOptions);
             } catch (FileAlreadyExistsException e) {
                 // Should never happen as we are not using CREATE_NEW
             } catch (NoSuchFileException e) {
@@ -141,17 +141,17 @@ public class JinixKernel {
             }
 
             try {
-                int initPid = es.exec(null, "/sbin/init.jar", new String[] {"-Xdebug","-Xrunjdwp:transport=dt_socket,address=5557,server=y,suspend=y"}, 0, -1, -1, raf, raf, raf);
+                int initPid = es.exec(null, "/sbin/init.jar", new String[] {/**"-Xdebug","-Xrunjdwp:transport=dt_socket,address=5557,server=y,suspend=y"*/}, 0, -1, -1, initLogRaf, initLogRaf, initLogRaf);
             } catch (FileNotFoundException e) {
                 System.err.println("Init executable not found at /sbin/init.jar");
-                if (raf != null) {
-                    raf.close();
+                if (initLogRaf != null) {
+                    initLogRaf.close();
                 }
                 System.exit(0);
             } catch (InvalidExecutableException e) {
                 System.err.println("Invalid executable at /sbin/init.jar");
-                if (raf != null) {
-                    raf.close();
+                if (initLogRaf != null) {
+                    initLogRaf.close();
                 }
                 System.exit(0);
             }
@@ -172,8 +172,15 @@ public class JinixKernel {
         }
     }
 
+    /**
+     * Shutdown the JinixKernel by interrupting the main thread. When the main thread is interrupted, it will exit the JVM
+     * and trigger the JVM shutdown hook to clean up.
+     */
     static void shutdown() {
-        pm.shutdown();
+        mainThread.interrupt();
+    }
+
+    static private void shutdownFromShutdownHook() {
         try {
             fs.unbind(ExecServer.SERVER_NAME);
             fs.unbind(ProcessManager.SERVER_NAME);
@@ -191,7 +198,6 @@ public class JinixKernel {
 
             shutdown = true;
             JinixKernelUnicastRemoteObject.dumpExportedObjects(System.out);
-            mainThread.interrupt();
         } catch (NoSuchObjectException e) {
             e.printStackTrace();
         } catch (NotBoundException e) {
@@ -221,21 +227,28 @@ public class JinixKernel {
                 rootLogger.getHandlers()[0].setFormatter(new BriefKernelLogFormatter());
                 rootLogger.getHandlers()[0].setLevel(Level.ALL);
                 consoleLogging = true;
-                logger = Logger.getLogger("jinix");
-                return; // Leave the default ConsoleHandler in place and log to the console
+                break;
             }
         }
 
-        //Clear all existing handlers
-        Handler[] oldHandler = rootLogger.getHandlers();
-        for (Handler h : oldHandler) {
-            rootLogger.removeHandler(h);
+        if (!consoleLogging) {
+            //Clear all existing handlers
+            Handler[] oldHandler = rootLogger.getHandlers();
+            for (Handler h : oldHandler) {
+                rootLogger.removeHandler(h);
+            }
+
+            Handler memHandler = LogServerServer.kernelLoggingHandler;
+            rootLogger.addHandler(memHandler);
         }
 
-        Handler memHandler = LogServerServer.kernelLoggingHandler;
-        rootLogger.addHandler(memHandler);
-
         logger = Logger.getLogger("jinix");
+        for (int i =0; i<args.length; i++) {
+            if (args[i].equals("-l") || args[i].equals("--logLevel")) {
+                logger.setLevel(Level.parse(args[i+1]));
+                break;
+            }
+        }
     }
 
     protected static void setupRMI(String serverName, String[] args) {

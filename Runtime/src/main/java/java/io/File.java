@@ -434,18 +434,18 @@ public class File
             throw new NullPointerException();
         }
 
-        SecurityManager securityManager = System.getSecurityManager();
-        if (securityManager != null) {
-            try {
-                securityManager.checkPermission(new JinixNativeAccessPermission());
-            } catch (AccessControlException e) {
-                nativeAccess = false;
-                String parentPath = "null";
-                if (parent != null) parentPath = parent.getPath();
+        if (parent != null) {
+            nativeAccess = parent.nativeAccess;
+        } else {
+            SecurityManager securityManager = System.getSecurityManager();
+            if (securityManager != null) {
+                try {
+                    securityManager.checkPermission(new JinixNativeAccessPermission());
+                } catch (AccessControlException e) {
+                    nativeAccess = false;
+                }
             }
         }
-
-        nativeAccess = parent.nativeAccess;
 
         if (parent != null) {
             if (parent.path.equals("")) {

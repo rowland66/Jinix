@@ -185,7 +185,7 @@ public class JinixFileSystemProvider extends FileSystemProvider {
 
     private DirectoryStream<Path> newDirectoryStreamInternal(Path dir, DirectoryStream.Filter<? super Path> filter)
             throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
+        LookupResult lookup = JinixRuntime.getRuntime().lookup(
                 dir.toAbsolutePath().normalize().toString());
         FileNameSpace fns = (FileNameSpace) lookup.remote;
         final String[] dirList = fns.list(lookup.remainingPath);
@@ -284,7 +284,7 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     }
 
     private void createDirectoryInternal(Path dir, FileAttribute<?>[] attrs) throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
+        LookupResult lookup = JinixRuntime.getRuntime().lookup(
                 dir.toAbsolutePath().normalize().toString());
         FileNameSpace fns = (FileNameSpace) lookup.remote;
         fns.createDirectory(lookup.remainingPath);
@@ -315,7 +315,7 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     }
 
     private void deleteInternal(Path path) throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
+        LookupResult lookup = JinixRuntime.getRuntime().lookup(
                 path.toAbsolutePath().normalize().toString());
         FileNameSpace fns = (FileNameSpace) lookup.remote;
         fns.delete(lookup.remainingPath);
@@ -341,7 +341,7 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     }
 
     private void copyInternal(Path source, Path target, CopyOption... options) throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
+        LookupResult lookup = JinixRuntime.getRuntime().lookup(
                 source.toAbsolutePath().normalize().toString());
         FileNameSpace fns = (FileNameSpace) lookup.remote;
         fns.copy(lookup.remainingPath, target.toAbsolutePath().normalize().toString(), options);
@@ -374,7 +374,7 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     }
 
     private void moveInternal(Path source, Path target, CopyOption... options) throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
+        LookupResult lookup = JinixRuntime.getRuntime().lookup(
                 source.toAbsolutePath().normalize().toString());
         FileNameSpace fns = (FileNameSpace) lookup.remote;
         fns.move(lookup.remainingPath, target.toAbsolutePath().normalize().toString(), options);
@@ -450,7 +450,7 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     }
 
     private void checkAccessInternal(Path path, AccessMode... modes) throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
+        LookupResult lookup = JinixRuntime.getRuntime().lookup(
                 path.toAbsolutePath().normalize().toString());
         if (lookup.remote instanceof FileNameSpace) {
             FileNameSpace fns = (FileNameSpace) lookup.remote;
@@ -550,7 +550,7 @@ public class JinixFileSystemProvider extends FileSystemProvider {
             throws IOException {
         try {
             int pid = JinixRuntime.getRuntime().getPid();
-            LookupResult lookup = JinixRuntime.getRuntime().getRootNamespace().lookup(
+            LookupResult lookup = JinixRuntime.getRuntime().lookup(
                     path.toAbsolutePath().toString());
             FileNameSpace fns = (FileNameSpace) lookup.remote;
             // Throws FileAlreadyExistsException with CREATE_NEW option
