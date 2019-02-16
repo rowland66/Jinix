@@ -29,6 +29,7 @@ import java.net.URI;
 import java.net.URL;
 import java.net.MalformedURLException;
 import java.net.URISyntaxException;
+import java.nio.file.NotDirectoryException;
 import java.security.AccessControlException;
 import java.util.ArrayList;
 import java.security.AccessController;
@@ -1351,7 +1352,11 @@ public class File
             }
             return fs.list(this);
         } else {
-            return jinixFile.list();
+            try {
+                return jinixFile.list();
+            } catch (NotDirectoryException e) {
+                return null;
+            }
         }
     }
 

@@ -11,6 +11,8 @@ import java.rmi.RemoteException;
  */
 public interface RemoteFileAccessor extends Remote {
 
+    RemoteFileHandle getRemoteFileHandle() throws RemoteException;
+
     /**
      * Read up to len bytes from a file. At least a single byte will be read or an end of file will be reached before
      * this method returns. The size of the byte[] returned indicates the number of bytes read. A null return value
@@ -52,6 +54,4 @@ public interface RemoteFileAccessor extends Remote {
     void duplicate() throws RemoteException;
 
     void force(boolean metadata) throws RemoteException;
-
-    void flush() throws RemoteException;
 }

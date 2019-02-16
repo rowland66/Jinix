@@ -1,6 +1,9 @@
 package org.rowland.jinix;
 
+import org.rowland.jinix.io.BaseRemoteFileHandleImpl;
+import org.rowland.jinix.naming.FileNameSpace;
 import org.rowland.jinix.naming.RemoteFileAccessor;
+import org.rowland.jinix.naming.RemoteFileHandle;
 
 import java.io.*;
 import java.rmi.RemoteException;
@@ -12,14 +15,23 @@ public class StringRemoteFileAccessor extends JinixKernelUnicastRemoteObject imp
     private ByteArrayInputStream data;
     private int openCount;
     private int size;
+    private FileNameSpace server;
+    private String path;
 
 
-    public StringRemoteFileAccessor(String fileData) throws RemoteException {
+    public StringRemoteFileAccessor(FileNameSpace parent, String path, String fileData) throws RemoteException {
         super();
+        server = parent;
+        this.path = path;
         openCount = 1;
         byte[] stringBytes = fileData.getBytes();
         size = stringBytes.length;
         data = new ByteArrayInputStream(stringBytes);
+    }
+
+    @Override
+    public RemoteFileHandle getRemoteFileHandle() throws RemoteException {
+        return new BaseRemoteFileHandleImpl(server, path);
     }
 
     @Override
@@ -97,10 +109,5 @@ public class StringRemoteFileAccessor extends JinixKernelUnicastRemoteObject imp
     @Override
     public void force(boolean metadata) throws RemoteException {
         throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void flush() throws RemoteException {
-
     }
 }

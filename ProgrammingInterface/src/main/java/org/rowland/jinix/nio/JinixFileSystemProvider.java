@@ -3,9 +3,7 @@ package org.rowland.jinix.nio;
 import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixNativeAccessPermission;
 import org.rowland.jinix.lang.JinixRuntime;
-import org.rowland.jinix.naming.FileNameSpace;
-import org.rowland.jinix.naming.LookupResult;
-import org.rowland.jinix.naming.RemoteFileAccessor;
+import org.rowland.jinix.naming.*;
 
 import java.io.IOException;
 import java.net.URI;
@@ -185,81 +183,93 @@ public class JinixFileSystemProvider extends FileSystemProvider {
 
     private DirectoryStream<Path> newDirectoryStreamInternal(Path dir, DirectoryStream.Filter<? super Path> filter)
             throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().lookup(
+        Object lookup = JinixRuntime.getRuntime().lookup(
                 dir.toAbsolutePath().normalize().toString());
-        FileNameSpace fns = (FileNameSpace) lookup.remote;
-        final String[] dirList = fns.list(lookup.remainingPath);
-        return new DirectoryStream<Path>() {
-            int i = 0;
-            boolean closed = false;
-            boolean iteratorReturned = false;
+        String[] dirList = null;
+        if (lookup instanceof RemoteFileHandle &&
+                ((RemoteFileHandle) lookup).getAttributes().type == DirectoryFileData.FileType.DIRECTORY ) {
+            dirList = ((RemoteFileHandle) lookup).getParent().list(((RemoteFileHandle) lookup).getPath());
+        }
+        if (lookup instanceof FileNameSpace) {
+            dirList = ((FileNameSpace) lookup).list("/");
+        }
 
-            @Override
-            public Iterator<Path> iterator() {
-                if (closed) {
-                    throw new IllegalStateException("DirectoryStream is already closed");
-                }
-                if (iteratorReturned) {
-                    throw new IllegalStateException("DirectoryStream iterator already returned");
-                }
-                iteratorReturned = true;
-                return new Iterator<Path> () {
-                    Path p = null;
-                    @Override
-                    public boolean hasNext() {
-                        try {
-                            if (p != null) {
-                                return true;
-                            }
-                            if (i >= dirList.length) {
-                                return false;
-                            }
-                            Path next = new JinixPath(jinixFileSystem, dirList[i]);
-                            while (!filter.accept(next)) {
-                                if (++i < dirList.length) {
-                                    next = new JinixPath(jinixFileSystem, dirList[i]);
-                                    continue;
+        if (dirList != null) {
+            String[] finalDirList = dirList;
+            return new DirectoryStream<Path>() {
+                int i = 0;
+                boolean closed = false;
+                boolean iteratorReturned = false;
+
+                @Override
+                public Iterator<Path> iterator() {
+                    if (closed) {
+                        throw new IllegalStateException("DirectoryStream is already closed");
+                    }
+                    if (iteratorReturned) {
+                        throw new IllegalStateException("DirectoryStream iterator already returned");
+                    }
+                    iteratorReturned = true;
+                    return new Iterator<Path>() {
+                        Path p = null;
+
+                        @Override
+                        public boolean hasNext() {
+                            try {
+                                if (p != null) {
+                                    return true;
                                 }
-                                p = null;
-                                return false;
+                                if (i >= finalDirList.length) {
+                                    return false;
+                                }
+                                Path next = new JinixPath(jinixFileSystem, finalDirList[i]);
+                                while (!filter.accept(next)) {
+                                    if (++i < finalDirList.length) {
+                                        next = new JinixPath(jinixFileSystem, finalDirList[i]);
+                                        continue;
+                                    }
+                                    p = null;
+                                    return false;
+                                }
+                                p = next;
+                                return true;
+                            } catch (IOException e1) {
+                                throw new RuntimeException(e1);
                             }
-                            p = next;
-                            return true;
-                        } catch (IOException e1) {
-                            throw new RuntimeException(e1);
                         }
-                    }
 
-                    @Override
-                    public Path next() {
-                        if (!hasNext()) {
-                            throw new NoSuchElementException();
+                        @Override
+                        public Path next() {
+                            if (!hasNext()) {
+                                throw new NoSuchElementException();
+                            }
+                            Path rtrn = p;
+                            p = null;
+                            i++;
+                            return rtrn;
                         }
-                        Path rtrn = p;
-                        p = null;
-                        i++;
-                        return rtrn;
-                    }
-                };
-            }
-
-            @Override
-            public void close() throws IOException {
-                closed = true;
-            }
-
-            @Override
-            public void forEach(Consumer<? super Path> action) {
-                for (Path p : this) {
-                    action.accept(p);
+                    };
                 }
-            }
 
-            @Override
-            public Spliterator<Path> spliterator() {
-                throw new UnsupportedOperationException();
-            }
-        };
+                @Override
+                public void close() throws IOException {
+                    closed = true;
+                }
+
+                @Override
+                public void forEach(Consumer<? super Path> action) {
+                    for (Path p : this) {
+                        action.accept(p);
+                    }
+                }
+
+                @Override
+                public Spliterator<Path> spliterator() {
+                    throw new UnsupportedOperationException();
+                }
+            };
+        }
+        throw new NotDirectoryException(dir.toAbsolutePath().toString());
     }
     @Override
     public void createDirectory(Path dir, FileAttribute<?>[] attrs) throws IOException {
@@ -284,10 +294,19 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     }
 
     private void createDirectoryInternal(Path dir, FileAttribute<?>[] attrs) throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().lookup(
-                dir.toAbsolutePath().normalize().toString());
-        FileNameSpace fns = (FileNameSpace) lookup.remote;
-        fns.createDirectory(lookup.remainingPath);
+        String dirString = dir.toAbsolutePath().normalize().toString();
+
+        dirString = dirString.substring(0, dirString.lastIndexOf('/'));
+        Object lookup = JinixRuntime.getRuntime().lookup(dirString);
+        if (lookup instanceof RemoteFileHandle && ((RemoteFileHandle) lookup).getAttributes().type == DirectoryFileData.FileType.DIRECTORY ) {
+            ((RemoteFileHandle) lookup).getParent().createDirectory(((RemoteFileHandle) lookup).getPath(), dir.getFileName().toString());
+            return;
+        }
+        if (lookup instanceof FileNameSpace) {
+            ((FileNameSpace) lookup).createDirectory("/", dir.getFileName().toString());
+            return;
+        }
+        throw new FileAlreadyExistsException(dir.toAbsolutePath().toString());
     }
 
     @Override
@@ -315,10 +334,15 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     }
 
     private void deleteInternal(Path path) throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().lookup(
-                path.toAbsolutePath().normalize().toString());
-        FileNameSpace fns = (FileNameSpace) lookup.remote;
-        fns.delete(lookup.remainingPath);
+        Object lookup = JinixRuntime.getRuntime().lookup(path.toAbsolutePath().normalize().toString());
+        if (lookup instanceof RemoteFileHandle) {
+            ((RemoteFileHandle) lookup).getParent().delete(((RemoteFileHandle) lookup).getPath());
+            return;
+        }
+        if (lookup instanceof FileNameSpace) {
+            throw new DirectoryNotEmptyException(path.toAbsolutePath().toString());
+        }
+        throw new NoSuchFileException(path.toAbsolutePath().toString());
     }
 
     @Override
@@ -341,12 +365,40 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     }
 
     private void copyInternal(Path source, Path target, CopyOption... options) throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().lookup(
-                source.toAbsolutePath().normalize().toString());
-        FileNameSpace fns = (FileNameSpace) lookup.remote;
-        fns.copy(lookup.remainingPath, target.toAbsolutePath().normalize().toString(), options);
+        Object srcLookup = JinixRuntime.getRuntime().lookup(source.toAbsolutePath().normalize().toString());
+        if (srcLookup instanceof RemoteFileHandle) {
+            Path targetDirectory = target.toAbsolutePath().normalize().getParent();
+            Object targetLookup = JinixRuntime.getRuntime().lookup(targetDirectory.toString());
+            if (targetLookup instanceof RemoteFileHandle &&
+                    ((RemoteFileHandle) targetLookup).getAttributes().type == DirectoryFileData.FileType.DIRECTORY) {
+                copyInternal2((RemoteFileHandle) srcLookup, (RemoteFileHandle) targetLookup, target.getFileName().toString(), options);
+                return;
+            }
+            if (targetLookup instanceof FileNameSpace) {
+                RemoteFileHandle targetDirectoryFile = (RemoteFileHandle) ((FileNameSpace) targetLookup).lookup(-1, "/.");
+                copyInternal2((RemoteFileHandle) srcLookup, targetDirectoryFile, target.getFileName().toString(), options);
+                return;
+            }
+            throw new NoSuchFileException(target.toAbsolutePath().toString());
+        }
+        throw new NoSuchFileException(source.toAbsolutePath().toString());
     }
 
+    private void copyInternal2(RemoteFileHandle srcLookup, RemoteFileHandle targetLookup, String fileName, CopyOption... options)
+            throws IOException {
+
+        if ( targetLookup.getParent().getURI().equals(srcLookup.getParent().getURI()) ) {
+            srcLookup.getParent().copy(srcLookup, targetLookup, fileName, options);
+            return;
+        } else {
+            if (srcLookup.getAttributes().type == DirectoryFileData.FileType.DIRECTORY) {
+                throw new UnsupportedOperationException("Directory move between filesystems is not supported yet");
+            } else {
+                srcLookup.getParent().copy(srcLookup, targetLookup, fileName, options);
+                return;
+            }
+        }
+    }
 
     @Override
     public void move(Path source, Path target, CopyOption... options) throws IOException {
@@ -374,12 +426,46 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     }
 
     private void moveInternal(Path source, Path target, CopyOption... options) throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().lookup(
-                source.toAbsolutePath().normalize().toString());
-        FileNameSpace fns = (FileNameSpace) lookup.remote;
-        fns.move(lookup.remainingPath, target.toAbsolutePath().normalize().toString(), options);
+        Object srcLookup = JinixRuntime.getRuntime().lookup(source.toAbsolutePath().normalize().toString());
+        if (srcLookup instanceof RemoteFileHandle) {
+            target = target.toAbsolutePath().normalize();
+            Path targetDirectory = target.getParent();
+            String fileName = target.getFileName().toString();
+            Object targetLookup = JinixRuntime.getRuntime().lookup(targetDirectory.toString());
+
+            if (targetLookup instanceof RemoteFileHandle &&
+                    ((RemoteFileHandle) targetLookup).getAttributes().type == DirectoryFileData.FileType.DIRECTORY) {
+                moveInternal2((RemoteFileHandle) srcLookup, (RemoteFileHandle) targetLookup, fileName, options);
+                return;
+            }
+
+            if (targetLookup instanceof FileNameSpace) {
+                RemoteFileHandle targetDirectoryFile = (RemoteFileHandle) ((FileNameSpace) targetLookup).lookup(-1, "/.");
+                moveInternal2((RemoteFileHandle) srcLookup, targetDirectoryFile, fileName, options);
+                return;
+            }
+
+            throw new NoSuchFileException(target.toAbsolutePath().toString());
+        }
+
+        throw new NoSuchFileException(source.toAbsolutePath().toString());
     }
 
+    private void moveInternal2(RemoteFileHandle srcLookup, RemoteFileHandle targetLookup, String fileName, CopyOption... options)
+            throws IOException {
+        if ( targetLookup.getParent().getURI().equals(srcLookup.getParent().getURI()) ) {
+            srcLookup.getParent().move(srcLookup, targetLookup, fileName, options);
+            return;
+        } else {
+            if (srcLookup.getAttributes().type == DirectoryFileData.FileType.DIRECTORY) {
+                throw new UnsupportedOperationException("Directory move between filesystems is not supported yet");
+            } else {
+                srcLookup.getParent().copy(srcLookup, targetLookup, fileName, options);
+                srcLookup.getParent().delete(srcLookup.getPath());
+                return;
+            }
+        }
+    }
     @Override
     public boolean isSameFile(Path path, Path path2) throws IOException {
         if (defaultFileSystemProvider == null) {
@@ -450,15 +536,12 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     }
 
     private void checkAccessInternal(Path path, AccessMode... modes) throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().lookup(
-                path.toAbsolutePath().normalize().toString());
-        if (lookup.remote instanceof FileNameSpace) {
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            if (!fns.exists(lookup.remainingPath)) {
-                throw new NoSuchFileException(path.toString());
-            }
-        } else {
-            throw new AccessDeniedException(path.toString());
+        Object lookup = JinixRuntime.getRuntime().lookup(path.toAbsolutePath().normalize().toString());
+        if (lookup == null) {
+            throw new NoSuchFileException(path.toAbsolutePath().toString());
+        }
+        if (!(lookup instanceof RemoteFileHandle) && !(lookup instanceof FileNameSpace)) {
+            throw new AccessDeniedException(path.toAbsolutePath().toString());
         }
     }
 
@@ -550,11 +633,30 @@ public class JinixFileSystemProvider extends FileSystemProvider {
             throws IOException {
         try {
             int pid = JinixRuntime.getRuntime().getPid();
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(
-                    path.toAbsolutePath().toString());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            // Throws FileAlreadyExistsException with CREATE_NEW option
-            return fns.getRemoteFileAccessor(pid, lookup.remainingPath, options);
+            path = path.toAbsolutePath();
+            Object lookup = JinixRuntime.getRuntime().lookup(path.toString());
+            if (lookup != null) {
+                if (lookup instanceof RemoteFileHandle && ((RemoteFileHandle) lookup).getAttributes().type == DirectoryFileData.FileType.FILE) {
+                    // Throws FileAlreadyExistsException with CREATE_NEW option
+                    return ((RemoteFileHandle) lookup).getParent().getRemoteFileAccessor(pid, ((RemoteFileHandle) lookup).getPath(), options);
+                } else {
+                    throw new NoSuchFileException(path.toString());
+                }
+            } else {
+                String fileName = path.getFileName().toString();
+                Object directoryLookup = JinixRuntime.getRuntime().lookup(path.getParent().toString());
+                if (directoryLookup != null) {
+                    if (directoryLookup instanceof RemoteFileHandle && ((RemoteFileHandle) directoryLookup).getAttributes().type == DirectoryFileData.FileType.DIRECTORY) {
+                        return ((RemoteFileHandle) directoryLookup).getParent().getRemoteFileAccessor(pid,
+                                ((RemoteFileHandle) directoryLookup).getPath()+"/"+fileName, options);
+                    } else if (directoryLookup instanceof FileNameSpace) {
+                        directoryLookup = JinixRuntime.getRuntime().lookup(path.getParent().toString() + "/.");
+                        return ((RemoteFileHandle) directoryLookup).getParent().getRemoteFileAccessor(pid,
+                                ((RemoteFileHandle) directoryLookup).getPath()+"/"+fileName, options);
+                    }
+                }
+            }
+            throw new NoSuchFileException(path.toString());
         } catch (RemoteException e) {
             throw new IOException("IOException creating file channel", e.getCause());
         }

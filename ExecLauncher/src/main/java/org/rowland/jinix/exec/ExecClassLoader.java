@@ -15,7 +15,9 @@ import java.io.InputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.channels.NonReadableChannelException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.StandardOpenOption;
 import java.rmi.RemoteException;
 import java.security.*;
 import java.util.*;
@@ -44,23 +46,30 @@ public class ExecClassLoader extends SecureClassLoader {
     /**
      * Create an ExecClassloader for a Jinix jar file.
      *
-     * @param jarFile the absolute pathname of a Jinix jar file
+     * @param jarFileName the absolute pathname of a Jinix jar file
      * @param privileged indicates whether classes loaded by this ClassLoader are privileged to native OS resources
      * @param parent the parent classloader
      */
-    ExecClassLoader(String jarFile, boolean privileged, ClassLoader parent) {
+    public ExecClassLoader(String jarFileName, boolean privileged, ClassLoader parent) {
         super(parent);
-        this.jarFileName = jarFile;
+        this.jarFileName = jarFileName;
         this.isPrivileged = privileged;
         this.acc = AccessController.getContext();
         this.remoteJarList = new LinkedList<RemoteJarHolder>();
 
         Context ctx = JinixRuntime.getRuntime().getNamingContext();
         try {
-            remoteJarList.add(new RemoteJarHolder(jarFile, (RemoteJarFileAccessor) ctx.lookup(jarFile)));
+            RemoteFileHandle jarFile = (RemoteFileHandle) ctx.lookup(jarFileName);
+            RemoteJarFileAccessor jarFileAccessor = (RemoteJarFileAccessor) jarFile.getParent().
+                    getRemoteFileAccessor(JinixRuntime.getRuntime().getPid(), jarFile.getPath(), EnumSet.noneOf(StandardOpenOption.class));
+            remoteJarList.add(new RemoteJarHolder(jarFileName, jarFileAccessor));
         } catch (NameNotFoundException | ClassCastException e) {
             remoteJarList = null; // We don't fail, but when remoteJarList is null, no classes will be loaded.
         } catch (NamingException e) {
+            throw new RuntimeException(e);
+        } catch (FileAlreadyExistsException | NoSuchFileException e) {
+            throw new RuntimeException("Internal error: ", e); // This should never happen
+        } catch (RemoteException e) {
             throw new RuntimeException(e);
         }
 
@@ -81,7 +90,7 @@ public class ExecClassLoader extends SecureClassLoader {
      * @param remoteJarAccessor a RemoteJarFileAccessor corresponding to the jarFileName
      * @param parent the parent classloader
      */
-    ExecClassLoader(String jarFileName, boolean privileged, RemoteJarFileAccessor remoteJarAccessor, ClassLoader parent) {
+    public ExecClassLoader(String jarFileName, boolean privileged, RemoteJarFileAccessor remoteJarAccessor, ClassLoader parent) {
         super(parent);
         this.jarFileName = jarFileName;
         this.isPrivileged = privileged;
@@ -99,7 +108,7 @@ public class ExecClassLoader extends SecureClassLoader {
         closed = false;
     }
 
-    void addLibraryToClasspath(String jarFile) {
+    void addLibraryToClasspath(String jarFileName) {
         String libraryPathStr = JinixSystem.getJinixProperties().getProperty(JinixRuntime.JINIX_LIBRARY_PATH);
         if (libraryPathStr == null || libraryPathStr.isEmpty()) {
             return;
@@ -108,14 +117,21 @@ public class ExecClassLoader extends SecureClassLoader {
         Context ctx = JinixRuntime.getRuntime().getNamingContext();
         String[] libraryPath = libraryPathStr.split(":");
         for(String libDir : libraryPath) {
-            String libPathName = libDir + "/" + jarFile;
+            String libPathName = libDir + "/" + jarFileName;
             try {
-                remoteJarList.add(new RemoteJarHolder(libPathName, (RemoteJarFileAccessor) ctx.lookup(libPathName)));
+                RemoteFileHandle jarFile = (RemoteFileHandle) ctx.lookup(libPathName);
+                RemoteJarFileAccessor jarFileAccessor = (RemoteJarFileAccessor) jarFile.getParent().getRemoteFileAccessor(
+                        JinixRuntime.getRuntime().getPid(), jarFile.getPath(), EnumSet.noneOf(StandardOpenOption.class));
+                remoteJarList.add(new RemoteJarHolder(libPathName, jarFileAccessor));
                 break;
             } catch (NameNotFoundException e) {
                 // Ignore. If we don't find the continue searching.
             } catch (NamingException e) {
                 throw new RuntimeException("Internal error", e);
+            } catch (FileAlreadyExistsException | NoSuchFileException e) {
+                throw new RuntimeException("Internal error: ", e); // This should never happen
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
             }
         }
     }
@@ -161,7 +177,7 @@ public class ExecClassLoader extends SecureClassLoader {
             if (pae.getException() instanceof ClassNotFoundException) {
                 throw (ClassNotFoundException) pae.getException();
             }
-            throw new RuntimeException(pae.getException());
+            throw new RuntimeException("Critical failure finding class: "+name, pae.getException());
         }
         if (result == null) {
             throw new ClassNotFoundException(name);
@@ -263,7 +279,7 @@ public class ExecClassLoader extends SecureClassLoader {
      *
      * @return the absolute pathname of the jar file
      */
-    String getJarFileName() {
+    public String getJarFileName() {
         return this.jarFileName;
     }
 
@@ -343,7 +359,7 @@ public class ExecClassLoader extends SecureClassLoader {
         }
     }
 
-    void close() {
+    public void close() {
         for (RemoteJarHolder remoteJarHolder : remoteJarList) {
             try {
                 remoteJarHolder.remoteJar.close();

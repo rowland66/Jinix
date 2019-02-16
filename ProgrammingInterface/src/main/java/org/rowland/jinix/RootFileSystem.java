@@ -8,10 +8,7 @@ import org.rowland.jinix.naming.NameSpace;
  */
 public interface RootFileSystem {
 
-    /**
-     * Set the root name space for which this file system is the root file system.
-     *
-     * @param root
-     */
-    void setRootNameSpace(NameSpace root);
+    void sync();
+
+    void shutdown();
 }

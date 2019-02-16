@@ -42,9 +42,9 @@ public interface NameSpace extends java.rmi.Remote {
      * @throws RemoteException
      */
 
-    LookupResult lookup(String path) throws RemoteException;
+    Object lookup(String path) throws RemoteException;
 
-    LookupResult lookup(int pid, String path) throws RemoteException;
+    Object lookup(int pid, String path) throws RemoteException;
 
     List<FileAccessorStatistics> getOpenFiles(int pid) throws RemoteException;
 

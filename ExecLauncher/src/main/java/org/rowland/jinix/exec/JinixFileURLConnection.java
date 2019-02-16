@@ -4,6 +4,7 @@ import org.rowland.jinix.io.JinixFile;
 import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixFileInputStream;
 import org.rowland.jinix.lang.JinixRuntime;
+import org.rowland.jinix.naming.RemoteFileHandle;
 import org.rowland.jinix.naming.RemoteJarFileAccessor;
 
 import javax.naming.Context;
@@ -15,8 +16,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.net.URLConnection;
+import java.nio.file.StandardOpenOption;
 import java.rmi.Remote;
 import java.security.Permission;
+import java.util.EnumSet;
 import java.util.List;
 
 /**
@@ -44,7 +47,8 @@ public class JinixFileURLConnection extends URLConnection {
 
             try {
                 Context ctx = JinixRuntime.getRuntime().getNamingContext();
-                Remote r = (Remote) ctx.lookup(fileName);
+                RemoteFileHandle rfh = (RemoteFileHandle) ctx.lookup(fileName);
+                Remote r = rfh.open(JinixRuntime.getRuntime().getPid(), EnumSet.of(StandardOpenOption.READ));
                 if (r instanceof RemoteJarFileAccessor) {
                     RemoteJarFileAccessor remoteJar = (RemoteJarFileAccessor) r;
                     if (remoteJar.findEntry(resourcePath) == -1) {

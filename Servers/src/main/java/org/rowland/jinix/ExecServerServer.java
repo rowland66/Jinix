@@ -7,6 +7,7 @@ import org.rowland.jinix.naming.*;
 import org.rowland.jinix.proc.ProcessManager;
 import org.rowland.jinix.proc.RegisterResult;
 
+import javax.management.remote.rmi.RMIServer;
 import java.io.*;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.NoSuchFileException;
@@ -39,11 +40,11 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
         this.ns = nameSpace;
         this.javaHome = javaHome;
 
-        this.pm = (ProcessManager) ns.lookup(ProcessManager.SERVER_NAME).remote;
+        this.pm = (ProcessManager) ns.lookup(ProcessManager.SERVER_NAME);
     }
 
     @Override
-    public int execTranslator(String cmd, String[] args, RemoteFileAccessor translatorNode, String translatorNodePath)
+    public int execTranslator(String cmd, String[] args, RemoteFileHandle translatorNode, String translatorNodePath)
             throws FileNotFoundException, InvalidExecutableException, RemoteException {
         return exec0(null, cmd, args, 1, -1, 1,
                 null, null, null,
@@ -73,23 +74,26 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                       RemoteFileAccessor stdIn,
                       RemoteFileAccessor stdOut,
                       RemoteFileAccessor stdErr,
-                      RemoteFileAccessor translatorNode,
+                      RemoteFileHandle translatorNode,
                       String translatorNodePath,
                       String codebaseURL)
             throws FileNotFoundException, InvalidExecutableException, RemoteException {
         Runtime runtime = Runtime.getRuntime();
 
-        LookupResult lookup = this.ns.lookup(cmd);
-        FileNameSpace fs = (FileNameSpace) lookup.remote;
+        Object lookup = this.ns.lookup(cmd);
+        if (lookup == null || !(lookup instanceof RemoteFileHandle)) {
+            throw new FileNotFoundException(cmd);
+        }
         StringBuilder redirectExecutable = new StringBuilder(128);
         RemoteFileAccessor cmdFd = null;
         try {
             try {
-                cmdFd = fs.getRemoteFileAccessor(-1, lookup.remainingPath, EnumSet.of(StandardOpenOption.READ));
+                cmdFd = ((RemoteFileHandle) lookup).getParent().
+                        getRemoteFileAccessor(-1, (RemoteFileHandle) lookup, EnumSet.of(StandardOpenOption.READ));
             } catch (FileAlreadyExistsException e) {
                 throw new RuntimeException("Internal Error",e); // should never happen
             } catch (NoSuchFileException e) {
-                throw new FileNotFoundException("File not found: '"+cmd+"'");
+                throw new FileNotFoundException(cmd);
             }
 
             if (!isValidExecutable(cmdFd, redirectExecutable)) {
@@ -111,14 +115,17 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
 
             cmd = redirectExecutable.toString();
             lookup = this.ns.lookup(cmd);
-            fs = (FileNameSpace) lookup.remote;
+            if (lookup == null || !(lookup instanceof RemoteFileHandle)) {
+                throw new FileNotFoundException(cmd);
+            }
             try {
                 try {
-                    cmdFd = fs.getRemoteFileAccessor(-1, lookup.remainingPath, EnumSet.of(StandardOpenOption.READ));
+                    cmdFd = ((RemoteFileHandle) lookup).getParent().
+                            getRemoteFileAccessor(-1, (RemoteFileHandle) lookup, EnumSet.of(StandardOpenOption.READ));
                 } catch (FileAlreadyExistsException e) {
                     throw new RuntimeException("Internal Error",e); // should never happen
                 } catch (NoSuchFileException e) {
-                    throw new FileNotFoundException("File not found: '"+cmd+"'");
+                    throw new FileNotFoundException(cmd);
                 }
 
                 if (!isValidExecutable(cmdFd, null)) {
@@ -183,7 +190,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
             }
         }
         cmdList.add("-classpath");
-        String classPathStr = "./lib/ExecLauncher.jar";
+        String classPathStr = "./lib/ExecLauncher.jar" + File.pathSeparator + "./lib/NativeFileSystem.jar";
         if (rmiMode == JinixKernel.RMI_MODE.AFUNIX) {
             classPathStr = classPathStr + File.pathSeparator + "./lib/AFUNIXRMI.jar";
         }
@@ -246,7 +253,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
                                 OutputStreamWriter byteWriter = new OutputStreamWriter(bos);
                                 byteWriter.write("Internal failure launching OS process. Check debugging parameters.\n");
                                 stdErr.write(-1, bos.toByteArray());
-                                stdErr.flush();
+                                stdErr.force(false);
                             }
                         } catch (IOException e) {
                             logger.log(Level.SEVERE, "", e);
@@ -306,7 +313,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
     }
 
     @Override
-    public ExecLauncherData execLauncherCallback(int pid) throws RemoteException {
+    public ExecLauncherData execLauncherCallback(int pid, RMIServer processMBeanServer) throws RemoteException {
         ExecLauncherCallbackData p = callbackDataMap.get(pid);
 
         if (p == null) {
@@ -326,6 +333,8 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
         synchronized (callbackDataMap) {
             callbackDataMap.remove(pid);
         }
+
+        pm.registerProcessMBeanServer(pid, processMBeanServer);
 
         return rtrn;
     }
@@ -406,7 +415,7 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
         RemoteFileAccessor stdOut;
         RemoteFileAccessor stdErr;
         Properties environment;
-        RemoteFileAccessor translatorNode;
+        RemoteFileHandle translatorNode;
         String translatorNodePath;
     }
 }

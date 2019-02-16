@@ -148,7 +148,7 @@ public class Init {
                 for (ProcessData p : processData) {
                     if (p.parentId == 1 && p.sessionId == 1 && p.processGroupId != lastProcessGroupId) { // Terminate all process groups that are translators
                         System.out.println("Init: Shutting down translator process: "+p.id + ":" + p.cmd);
-                        runtime.sendSignalProcessGroup(p.processGroupId, ProcessManager.Signal.KILL);
+                        runtime.sendSignalProcessGroup(p.processGroupId, ProcessManager.Signal.TERMINATE);
                         processFound = true;
                         lastProcessGroupId = p.processGroupId;
                     }

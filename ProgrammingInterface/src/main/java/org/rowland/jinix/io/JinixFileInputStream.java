@@ -1,8 +1,7 @@
 package org.rowland.jinix.io;
 
 import org.rowland.jinix.lang.JinixRuntime;
-import org.rowland.jinix.naming.FileNameSpace;
-import org.rowland.jinix.naming.LookupResult;
+import org.rowland.jinix.naming.RemoteFileHandle;
 import org.rowland.jinix.nio.JinixFileChannel;
 import org.rowland.jinix.terminal.TerminalBlockedOperationException;
 
@@ -33,15 +32,19 @@ public class JinixFileInputStream extends InputStream {
     public JinixFileInputStream(JinixFile file) throws FileNotFoundException {
         try {
             int pid = JinixRuntime.getRuntime().getPid();
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(file.getCanonicalPath());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            fd = new JinixFileDescriptor(fns.getRemoteFileAccessor(pid, lookup.remainingPath, inputStreamOpenOptionSet));
-            fd.attach(this);
+            Object lookup = JinixRuntime.getRuntime().lookup(file.getCanonicalPath());
+            if (lookup instanceof RemoteFileHandle) {
+                fd = new JinixFileDescriptor(((RemoteFileHandle) lookup).getParent().
+                        getRemoteFileAccessor(pid, ((RemoteFileHandle) lookup).getPath(), inputStreamOpenOptionSet));
+                fd.attach(this);
+                return;
+            }
+            throw new FileNotFoundException(file.getAbsolutePath());
         } catch (FileAlreadyExistsException e) {
             throw new RuntimeException("Internal error", e); // Should never happen when opening channel in READ mode.
         } catch (NoSuchFileException e) {
             throw new FileNotFoundException("Unable to find file: " + file.getAbsolutePath());
-        } catch (IOException e) {
+        } catch (RemoteException e) {
             throw new RuntimeException(e);
         }
     }

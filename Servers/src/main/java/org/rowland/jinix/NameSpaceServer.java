@@ -226,12 +226,12 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
     }
 
     @Override
-    public LookupResult lookup(String path) throws RemoteException {
+    public Object lookup(String path) throws RemoteException {
         return lookup(0, path);
     }
 
     @Override
-    public LookupResult lookup(int pid, String path) throws RemoteException {
+    public Object lookup(int pid, String path) throws RemoteException {
 
         if (!path.startsWith("/")) {
             throw new IllegalArgumentException("Lookup path must begin with slash: "+path);
@@ -246,17 +246,18 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
             throw new RemoteException("NameSpaceServer: translator executable not found", e);
         }
 
-        LookupResult rtrn = new LookupResult();
         if (obj == null) {
-            rtrn.remote = rootFileSystem;
-            rtrn.remainingPath = remainingPath.getPath();
-            return rtrn;
+            return rootFileSystem.lookup(pid, remainingPath.getPath());
         } else {
-            rtrn.remote = (Remote) obj;
-            rtrn.remainingPath = remainingPath.getPath();
+            if (remainingPath.getPath().isEmpty()) {
+                return obj;
+            }
+            if (obj instanceof FileNameSpace) {
+                return ((FileNameSpace) obj).lookup(pid, remainingPath.getPath());
+            }
         }
 
-        return rtrn;
+        return null;
     }
 
     @Override
@@ -329,21 +330,8 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
                         return null;
                     }
                 }
-                if(remainingPath.getPath().isEmpty()) {
-                    remainingPath.setPath("/");
-                    return obj;
-                } else {
-                    if (obj instanceof NameSpace) {
-                        NameSpace subNameSpace = (NameSpace) obj;
-                        return subNameSpace.lookup(pid, remainingPath.getPath());
-                    }
-                    if (obj instanceof FileNameSpace) {
-                        return obj;
-                    }
-                    else {
-                        throw new FileNotFoundException("Object found that does not support NameSpace, remaining path: "+remainingPath.getPath());
-                    }
-                }
+
+                return obj;
             }
             int i = parentPath.lastIndexOf('/');
             remainingPath.setPath(parentPath.substring(i, parentPath.length()) + remainingPath.getPath());
@@ -358,6 +346,10 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
             return super.unexport();
         }
         return false;
+    }
+
+    FileNameSpace getRootFileSystem() {
+        return rootFileSystem;
     }
 
     /**
@@ -377,7 +369,7 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
 
     private void startTranslator(TranslatorDefinition td)
             throws InterruptedException, InvalidExecutableException, IOException {
-        ExecServer es = (ExecServer) lookup(ExecServer.SERVER_NAME).remote;
+        ExecServer es = (ExecServer) lookup(ExecServer.SERVER_NAME);
 
         Map<String,String> env = new HashMap<String,String>();
 
@@ -395,17 +387,14 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
         execArgsList.toArray(execArgs);
 
         // We cannot use lookupInternal because we need the fs file, and not the translator
-        if (!rootFileSystem.exists(td.node)) { // remove the leading '/'
+        Object translatorTarget = rootFileSystem.lookup(0, td.node);
+        if (translatorTarget == null || !(translatorTarget instanceof RemoteFileHandle)) { // remove the leading '/'
             throw new RemoteException("Illegal attempt to start a translator on a filesystem node that does not exist: "+td.node);
         }
 
-        RemoteFileAccessor fc = null;
-        if (rootFileSystem.getFileAttributes(td.node).type == DirectoryFileData.FileType.FILE) {
-            fc = rootFileSystem.getRemoteFileAccessor(-1, td.node, EnumSet.of(StandardOpenOption.READ, StandardOpenOption.WRITE));
-        }
 
         try {
-            td.pid = es.execTranslator(cmd, execArgs, fc, td.node);
+            td.pid = es.execTranslator(cmd, execArgs, (RemoteFileHandle) translatorTarget, td.node);
         } catch (FileNotFoundException | InvalidExecutableException | RemoteException e) {
             throw e;
         }
@@ -437,7 +426,7 @@ class NameSpaceServer extends JinixKernelUnicastRemoteObject implements NameSpac
 
     private void terminateTranslator(int pid) {
         try {
-            ProcessManager pm = (ProcessManager) lookup(ProcessManager.SERVER_NAME).remote;
+            ProcessManager pm = (ProcessManager) lookup(ProcessManager.SERVER_NAME);
             //pm.registerEventNotificationHandler(td.pid, ProcessManager.EventName.DEREGISTER, );
             pm.sendSignal(pid, ProcessManager.Signal.TERMINATE);
         } catch (RemoteException e) {

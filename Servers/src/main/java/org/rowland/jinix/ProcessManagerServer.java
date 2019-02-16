@@ -1,14 +1,17 @@
 package org.rowland.jinix;
 
+import org.rowland.jinix.io.BaseRemoteFileHandleImpl;
+import org.rowland.jinix.io.SimpleDirectoryRemoteFileHandle;
 import org.rowland.jinix.naming.*;
 import org.rowland.jinix.proc.*;
 
+import javax.management.remote.rmi.RMIServer;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.*;
+import java.rmi.Remote;
 import java.rmi.RemoteException;
 import java.util.*;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
@@ -26,12 +29,12 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
     private NameSpace ns;
     private AtomicInteger nextId = new AtomicInteger(1); // Ever increasing counter for the next process id
 
-    Map<Integer, Proc> processMap; // Map from process id to Proc objects maintained for each running process
-    Map<Integer, List<Proc>> processGroupMap; // Map from process group id to a list of Proc objects belonging to the process group
+    private Map<Integer, Proc> processMap; // Map from process id to Proc objects maintained for each running process
+    private Map<Integer, List<Proc>> processGroupMap; // Map from process group id to a list of Proc objects belonging to the process group
 
-    Map<EventName, List<EventNotificationHandler>> globalEventHandlers; // Handlers for global events (DEREGISTER and RESUME)
+    private Map<EventName, List<EventNotificationHandler>> globalEventHandlers; // Handlers for global events (DEREGISTER and RESUME)
 
-    long startUpTime;
+    private long startUpTime;
 
     ProcessManagerServer(NameSpace rootNameSpace) throws RemoteException {
         super();
@@ -41,6 +44,7 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
         globalEventHandlers = new HashMap<>();
         startUpTime = System.currentTimeMillis();
         state = State.RUNNING;
+
     }
 
     /**
@@ -132,6 +136,15 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
 
             return rtrn;
         }
+    }
+
+    @Override
+    public void registerProcessMBeanServer(int id, RMIServer remoteMBeanServer) {
+        Proc process = processMap.get(id);
+        if (process == null) {
+            throw new RuntimeException("Illegal attempt to register remoteMBeanServer for invalid pid: "+id);
+        }
+        process.platformMBeanServer = remoteMBeanServer;
     }
 
     /**
@@ -477,11 +490,6 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
     @Override
     public void sendSignal(int pid, Signal signal) {
 
-        if (signal == Signal.SHUTDOWN) {
-            JinixKernel.shutdown();
-            return;
-        }
-
         Proc p = processMap.get(pid);
 
         if (p == null) {
@@ -683,292 +691,108 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
     }
 
     @Override
-    public DirectoryFileData getFileAttributes(String name) throws NoSuchFileException, RemoteException {
-        if (!name.startsWith("/")) {
-            throw new RemoteException("Invalid file name: "+name);
+    public DirectoryFileData getFileAttributes(String filePathName) throws NoSuchFileException, RemoteException {
+        if (!filePathName.startsWith("/")) {
+            throw new RemoteException("Invalid file name: "+filePathName);
         }
 
-        name = name.trim().substring(1);
-
-        if (name.isEmpty()) {
-            DirectoryFileData rtrn = new DirectoryFileData();
-            rtrn.lastModified = getStartUpTime();
-            rtrn.length = 0;
-            rtrn.name = "proc";
-            rtrn.type = DirectoryFileData.FileType.DIRECTORY;
-            return rtrn;
+        ProcessManageerVirtualFileSystem pmvfs = new ProcessManageerVirtualFileSystem();
+        PMVFSNode node = pmvfs.lookup(filePathName);
+        if (node != null) {
+            return node.dfd;
         }
 
-        ProcFNSParts parts = parseProcFNSParts(name);
-
-        ProcessManagerServer.Proc proc = processMap.get(parts.pid);
-        if (proc == null) {
-            throw new NoSuchFileException(name);
-        }
-
-        if (parts.component == null) {
-            DirectoryFileData rtrn = new DirectoryFileData();
-            rtrn.lastModified = proc.startTime;
-            rtrn.name = Integer.toString(parts.pid);
-            rtrn.type = DirectoryFileData.FileType.DIRECTORY;
-            return rtrn;
-        }
-
-        if (parts.component == ComponentEnum.FILES) {
-
-            if (parts.operand == null) {
-                DirectoryFileData rtrn = new DirectoryFileData();
-                rtrn.lastModified = proc.startTime;
-                rtrn.name = "files";
-                rtrn.type = DirectoryFileData.FileType.DIRECTORY;
-                return rtrn;
-            } else {
-                List<FileAccessorStatistics> l = ns.getOpenFiles(parts.pid);
-                for (FileAccessorStatistics fas : l) {
-                    String fileName = fas.getAbsolutePathName();
-                    if (parts.operand.equals(fileName)) {
-                        DirectoryFileData rtrn = new DirectoryFileData();
-                        rtrn.lastModified = proc.startTime;
-                        rtrn.name = fileName;
-                        rtrn.type = DirectoryFileData.FileType.FILE;
-                        return rtrn;
-                    }
-                }
-                throw new NoSuchFileException(name);
-            }
-        } else if (parts.component == ComponentEnum.CMDLINE) {
-            if (parts.operand == null) {
-                DirectoryFileData rtrn = new DirectoryFileData();
-                rtrn.lastModified = proc.startTime;
-                rtrn.name = "cmdline";
-                rtrn.type = DirectoryFileData.FileType.FILE;
-                return rtrn;
-            }
-            throw new NoSuchFileException(name);
-        } else {
-            throw new NoSuchFileException(name);
-        }
+        throw new NoSuchFileException(filePathName);
     }
 
     @Override
-    public void setFileAttributes(String name, DirectoryFileData attributes) throws NoSuchFileException, RemoteException {
+    public void setFileAttributes(String filePathName, DirectoryFileData attributes) throws NoSuchFileException, RemoteException {
 
     }
 
     @Override
-    public boolean exists(String name) throws RemoteException {
-        return true;
+    public String[] list(String directoryPathName) throws NotDirectoryException, RemoteException {
+
+        if (!directoryPathName.startsWith("/")) {
+            throw new RemoteException("Invalid file name: " + directoryPathName);
+        }
+
+        ProcessManageerVirtualFileSystem pmvfs = new ProcessManageerVirtualFileSystem();
+        PMVFSNode node = pmvfs.lookup(directoryPathName);
+
+        if (node instanceof PMVFSDirectoryNode) {
+            return ((PMVFSDirectoryNode) node).getContents();
+        }
+
+        throw new NotDirectoryException(directoryPathName);
     }
 
     @Override
-    public String[] list(String name) throws NotDirectoryException, RemoteException {
-        if (!name.startsWith("/")) {
-            throw new RemoteException("Invalid file name: " + name);
-        }
-
-        name = name.trim().substring(1);
-
-        if (name.isEmpty()) {
-            String[] rtrn = new String[processMap.size()];
-            int i = 0;
-            for (Integer pid : processMap.keySet()) {
-                rtrn[i++] = pid.toString();
-            }
-            return rtrn;
-        }
-
-        ProcFNSParts parts = null;
-        try {
-            parts = parseProcFNSParts(name);
-        } catch (NoSuchFileException e) {
-            throw new NotDirectoryException(name);
-        }
-
-        ProcessManagerServer.Proc proc = processMap.get(parts.pid);
-        if (proc == null) {
-            throw new NotDirectoryException(name);
-        }
-
-        if (parts.component == null) {
-            String[] rtrn = new String[]{"cmdline","files"};
-            return rtrn;
-        }
-
-        if (parts.component == ComponentEnum.FILES) {
-
-            if (parts.operand == null) {
-                ArrayList<String> fileList = new ArrayList<String>(64);
-                List<FileAccessorStatistics> l = ns.getOpenFiles(parts.pid);
-                for (FileAccessorStatistics fas : l) {
-                    fileList.add(fas.getAbsolutePathName());
-                }
-                return fileList.toArray(new String[fileList.size()]);
-            } else {
-                throw new NotDirectoryException(name);
-            }
-        }
-
-        throw new NotDirectoryException(name);
-    }
-
-    @Override
-    public DirectoryFileData[] listDirectoryFileData(String name) throws NotDirectoryException, RemoteException {
-        if (!name.startsWith("/")) {
-            throw new RemoteException("Invalid file name: " + name);
-        }
-
-        name = name.trim().substring(1);
-
-        if (name.isEmpty()) {
-            DirectoryFileData[] rtrn = new DirectoryFileData[processMap.size()];
-            int i = 0;
-            for (Integer pid : processMap.keySet()) {
-                DirectoryFileData dfd = new DirectoryFileData();
-                dfd.name = pid.toString();
-                dfd.length = 0;
-                dfd.lastModified = processMap.get(pid).startTime;
-                dfd.type = DirectoryFileData.FileType.DIRECTORY;
-                rtrn[i++] = dfd;
-            }
-            return rtrn;
-        }
-
-        ProcFNSParts parts = null;
-        try {
-            parts = parseProcFNSParts(name);
-        } catch (NoSuchFileException e) {
-            throw new NotDirectoryException(name);
-        }
-
-        ProcessManagerServer.Proc proc = processMap.get(parts.pid);
-        if (proc == null) {
-            throw new NotDirectoryException(name);
-        }
-
-        if (parts.component == null) {
-            DirectoryFileData cmdline = new DirectoryFileData();
-            cmdline.name = "cmdline";
-            cmdline.length = 0;
-            cmdline.lastModified = 0;
-            cmdline.type = DirectoryFileData.FileType.FILE;
-
-            DirectoryFileData files = new DirectoryFileData();
-            files.name = "files";
-            files.length = 0;
-            files.lastModified = 0;
-            files.type = DirectoryFileData.FileType.DIRECTORY;
-
-            return new DirectoryFileData[]{files};
-        }
-
-        if (parts.component == ComponentEnum.FILES) {
-
-            if (parts.operand == null) {
-                ArrayList<DirectoryFileData> fileList = new ArrayList<DirectoryFileData>(64);
-                List<FileAccessorStatistics> l = ns.getOpenFiles(parts.pid);
-                for (FileAccessorStatistics fas : l) {
-                    DirectoryFileData dfd = new DirectoryFileData();
-                    dfd.name = fas.getAbsolutePathName();
-                    dfd.length = 0;
-                    dfd.lastModified = 0;
-                    dfd.type = DirectoryFileData.FileType.FILE;
-                    fileList.add(dfd);
-                }
-                return fileList.toArray(new DirectoryFileData[fileList.size()]);
-            } else {
-                throw new NotDirectoryException(name);
-            }
-        }
-        throw new NotDirectoryException(name);
-    }
-
-    @Override
-    public boolean createFileAtomically(String name) throws RemoteException {
+    public boolean createFileAtomically(String parentDirectoryPathName, String fileName) throws RemoteException {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public boolean createDirectory(String name) throws FileAlreadyExistsException, RemoteException {
+    public boolean createDirectory(String parentDirectoryPathName, String fileName) throws FileAlreadyExistsException, RemoteException {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public boolean createDirectories(String name) throws FileAlreadyExistsException, RemoteException {
+    public void delete(String filePathName) throws NoSuchFileException, DirectoryNotEmptyException, RemoteException {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public void delete(String name) throws NoSuchFileException, DirectoryNotEmptyException, RemoteException {
+    public void copy(RemoteFileHandle sourceFile, RemoteFileHandle targetFile, String fileName, CopyOption... options) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public void copy(String name, String pathNameTo, CopyOption... options) throws FileAlreadyExistsException, RemoteException {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void move(String name, String pathNameTo, CopyOption... options) throws FileAlreadyExistsException, RemoteException {
+    public void move(RemoteFileHandle sourceFile, RemoteFileHandle targetFile, String fileName, CopyOption... options) {
         throw new UnsupportedOperationException();
     }
 
     @Override
     public RemoteFileAccessor getRemoteFileAccessor(int pid, String name, Set<? extends OpenOption> options) throws FileAlreadyExistsException, NoSuchFileException, RemoteException {
-        if (!name.startsWith("/")) {
-            throw new RemoteException("Invalid file name: "+name);
+
+        ProcessManageerVirtualFileSystem pmvfs = new ProcessManageerVirtualFileSystem();
+        PMVFSNode node = pmvfs.lookup(name);
+
+        if (node instanceof PMVFSFileNode) {
+            return new StringRemoteFileAccessor(this, name, ((PMVFSFileNode) node).getContents());
         }
 
-        name = name.trim().substring(1);
-
-        if (name.isEmpty()) {
-            throw new NoSuchFileException(name);
-        }
-
-        ProcFNSParts parts = parseProcFNSParts(name);
-
-        ProcessManagerServer.Proc proc = processMap.get(parts.pid);
-        if (proc == null) {
-            throw new NoSuchFileException(name);
-        }
-
-        if (parts.component == null) {
-            throw new NoSuchFileException(name);
-        }
-
-        if (parts.component == ComponentEnum.FILES) {
-
-            if (parts.operand == null) {
-                throw new NoSuchFileException(name);
-            } else {
-                throw new NoSuchFileException(name);
-            }
-        } else if (parts.component == ComponentEnum.CMDLINE) {
-            if (parts.operand == null) {
-                StringBuilder pdb = new StringBuilder();
-                pdb.append(proc.cmd);
-                for (String arg : proc.args) {
-                    pdb.append(" " + arg);
-                }
-                pdb.append("\n");
-                return new StringRemoteFileAccessor(pdb.toString());
-            }
-        } else {
-            throw new NoSuchFileException(name);
+        if (node instanceof PMVFSDataNode) {
+            return new StringRemoteFileAccessor(this, name, ((PMVFSDataNode) node).getContents());
         }
 
         throw new NoSuchFileException(name);
-        /*
-        StringBuilder pdb = new StringBuilder();
-        pdb.append("PID="+Integer.toString(pidFile)+"\n");
-        pdb.append("PPID="+proc.parentId+"\n");
-        pdb.append("StartTime="+String.format("%1$tb %1$td %1$tY  %1$tH:%1$tM:%1$tS\n",proc.startTime));
-        pdb.append("Command="+proc.cmd+"\n");
-        return new StringRemoteFileAccessor(pdb.toString());
-        */
     }
 
     @Override
-    public Object getKey(String name) throws RemoteException {
+    public RemoteFileAccessor getRemoteFileAccessor(int pid, RemoteFileHandle fileHandle, Set<? extends OpenOption> options) throws FileAlreadyExistsException, NoSuchFileException, RemoteException {
+        return getRemoteFileAccessor(pid, fileHandle.getPath(), options);
+    }
+
+    @Override
+    public Object lookup(int pid, String name) throws RemoteException {
+        ProcessManageerVirtualFileSystem pmvfs = new ProcessManageerVirtualFileSystem();
+        PMVFSNode node = pmvfs.lookup(name);
+        if (node instanceof PMVFSDirectoryNode) {
+            return new SimpleDirectoryRemoteFileHandle(this, name);
+        }
+        if (node instanceof PMVFSFileNode) {
+            return new BaseRemoteFileHandleImpl(this, name);
+        }
+
+        if (node instanceof PMVFSDataNode) {
+            return new BaseRemoteFileHandleImpl(this, name);
+        }
+
+        if (node instanceof PMVFSObjectNode) {
+            return ((PMVFSObjectNode) node).getObject();
+        }
+
         return null;
     }
 
@@ -977,90 +801,281 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
         return null;
     }
 
+    @Override
+    public FileNameSpace getParent() throws RemoteException {
+        return JinixKernel.getNameSpaceRoot().getRootFileSystem();
+    }
+
+    @Override
+    public String getPathWithinParent() throws RemoteException {
+        return "/proc";
+    }
+
     // End of FileNameSpace interface implementation
 
-    long getStartUpTime() {
-        return startUpTime;
-    }
-
-    /**
-     * Break a FileNameSpace name into parts and parse into the structure of the proc FileNameSpace
-     *
-     * @param name
-     * @return
-     * @throws NoSuchFileException
-     */
-    ProcFNSParts parseProcFNSParts(String name) throws NoSuchFileException {
-        String[] names = name.split("/");
-
-        ProcFNSParts rtrn = new ProcFNSParts();
-
-        if (names.length > 0) {
-            try {
-                rtrn.pid = Integer.parseInt(names[0]);
-            } catch (NumberFormatException e) {
-                throw new NoSuchFileException(name);
-            }
-        }
-        if (names.length > 1) {
-            if (names[1].equals("files")) {
-                rtrn.component = ComponentEnum.FILES;
-            } else if (names[1].equals("cmdline")) {
-                rtrn.component = ComponentEnum.CMDLINE;
-            } else {
-                throw new NoSuchFileException(name);
-            }
-        }
-        if (names.length > 2) {
-            throw new NoSuchFileException(name);
-        }
-
-        return rtrn;
-    }
-
     private static class ProcFNSParts {
-        int pid;
+        int pid = -1;
         ComponentEnum component;
         String operand;
     }
 
     private enum ComponentEnum {
-        CMDLINE, CWD, EXE, FILES, FILEINFO
+        cmdline, CWD, EXE, files, FILEINFO, mbeans
     }
 
-    private void killProcessGroup(int id) {
-        List<Integer> childList = new LinkedList<Integer>();
-        for (Map.Entry<Integer, Proc> procMapEntry : processMap.entrySet()) {
-            if (procMapEntry.getValue().parentId == id) {
-                childList.add(procMapEntry.getValue().id);
+    private enum PMVFSDirectoryNodeType {
+        ROOT, PID, FILES
+    }
+
+    /**
+     * A virtual files system for the /proc FileNameSpace. This class provides a filesystem abstraction that several
+     * methods implementing the FileNameSpace interface can share. The process manager data is presented through this
+     * virtual file system.
+     */
+    private class ProcessManageerVirtualFileSystem {
+
+        /**
+         * Retrieve a node that represents a node in the virtual file system.
+         *
+         * @param pathName
+         * @return
+         */
+        PMVFSNode lookup(String pathName) {
+
+            try {
+                ProcFNSParts parts = null;
+                try {
+                    parts = parseProcFNSParts(pathName);
+                } catch (NoSuchFileException e) {
+                    return null;
+                }
+
+                if (parts.pid == -1) {
+                    DirectoryFileData rtrnDfd = new DirectoryFileData();
+                    rtrnDfd.name = "";
+                    rtrnDfd.length = 0;
+                    rtrnDfd.lastModified = 0;
+                    rtrnDfd.type = DirectoryFileData.FileType.DIRECTORY;
+                    PMVFSDirectoryNode rtrnNode = new PMVFSDirectoryNode(PMVFSDirectoryNodeType.ROOT);
+                    rtrnNode.pathName = pathName;
+                    rtrnNode.dfd = rtrnDfd;
+                    return rtrnNode;
+                }
+
+                Proc proc = processMap.get(parts.pid);
+                if (proc == null) {
+                    return null;
+                }
+
+                if (parts.component == null) {
+                    DirectoryFileData rtrnDfd = new DirectoryFileData();
+                    rtrnDfd.name = Integer.toString(parts.pid);
+                    rtrnDfd.length = 0;
+                    rtrnDfd.lastModified = proc.startTime;
+                    rtrnDfd.type = DirectoryFileData.FileType.DIRECTORY;
+                    PMVFSDirectoryNode rtrnNode = new PMVFSDirectoryNode(PMVFSDirectoryNodeType.PID);
+                    rtrnNode.pathName = pathName;
+                    rtrnNode.dfd = rtrnDfd;
+                    return rtrnNode;
+                }
+
+                if (parts.component == ComponentEnum.files) {
+
+                    if (parts.operand == null) {
+                        DirectoryFileData rtrnDfd = new DirectoryFileData();
+                        rtrnDfd.name = ComponentEnum.files.name();
+                        rtrnDfd.length = 0;
+                        rtrnDfd.lastModified = 0;
+                        rtrnDfd.type = DirectoryFileData.FileType.DIRECTORY;
+                        PMVFSDirectoryNode rtrnNode = new PMVFSDirectoryNode(PMVFSDirectoryNodeType.FILES);
+                        rtrnNode.pathName = pathName;
+                        rtrnNode.dfd = rtrnDfd;
+                        rtrnNode.key = new Integer(parts.pid);
+                        return rtrnNode;
+                    } else {
+                        List<FileAccessorStatistics> l = ns.getOpenFiles(parts.pid);
+                        FileAccessorStatistics fas = l.get(Integer.valueOf(parts.operand));
+                        if (fas != null) {
+                            DirectoryFileData rtrnDfd = new DirectoryFileData();
+                            rtrnDfd.name = parts.operand;
+                            rtrnDfd.length = 0;
+                            rtrnDfd.lastModified = 0;
+                            rtrnDfd.type = DirectoryFileData.FileType.FILE;
+                            PMVFSFileNode rtrnNode = new PMVFSFileNode();
+                            rtrnNode.pathName = pathName;
+                            rtrnNode.dfd = rtrnDfd;
+                            rtrnNode.key = fas;
+                            return rtrnNode;
+                        }
+                        return null;
+                    }
+                } else if (parts.component == ComponentEnum.cmdline) {
+                    if (parts.operand == null) {
+                        StringBuilder pdb = new StringBuilder();
+                        pdb.append(proc.cmd);
+                        for (String arg : proc.args) {
+                            pdb.append(" " + arg);
+                        }
+                        pdb.append("\n");
+                        DirectoryFileData rtrnDfd = new DirectoryFileData();
+                        rtrnDfd.name = parts.operand;
+                        rtrnDfd.length = 0;
+                        rtrnDfd.lastModified = 0;
+                        rtrnDfd.type = DirectoryFileData.FileType.FILE;
+                        PMVFSDataNode rtrnNode = new PMVFSDataNode();
+                        rtrnNode.pathName = pathName;
+                        rtrnNode.dfd = rtrnDfd;
+                        rtrnNode.data = pdb.toString();
+                        return rtrnNode;
+                    }
+                } else if (parts.component == ComponentEnum.mbeans) {
+                    if (parts.operand == null) {
+                        DirectoryFileData rtrnDfd = new DirectoryFileData();
+                        rtrnDfd.name = parts.operand;
+                        rtrnDfd.length = 0;
+                        rtrnDfd.lastModified = 0;
+                        rtrnDfd.type = DirectoryFileData.FileType.FILE;
+                        PMVFSObjectNode rtrnNode = new PMVFSObjectNode();
+                        rtrnNode.pathName = pathName;
+                        rtrnNode.dfd = rtrnDfd;
+                        rtrnNode.object = proc.platformMBeanServer;
+                        return rtrnNode;
+                    }
+                } else {
+                    return null;
+                }
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
             }
+            return null;
         }
 
-        for (Integer child : childList) {
-            killProcessGroup(child);
-        }
+        /**
+         * Break a FileNameSpace name into parts and parse into the structure of the proc FileNameSpace
+         *
+         * @param name
+         * @return
+         * @throws NoSuchFileException
+         */
+        ProcFNSParts parseProcFNSParts(String name) throws NoSuchFileException {
+            name = name.substring(1); // remove leading '/'
+            String[] names = name.split("/");
 
-        final Semaphore waitObj = new Semaphore(0);
+            ProcFNSParts rtrn = new ProcFNSParts();
 
-        registerEventNotificationHandler(id, EventName.DEREGISTER, new EventNotificationHandler() {
-            @Override
-            public void handleEventNotification(EventName event, Object eventData) throws RemoteException {
-                if (event == EventName.DEREGISTER) {
-                    waitObj.release();
+            if (names.length > 0 && !names[0].isEmpty()) {
+                try {
+                    rtrn.pid = Integer.parseInt(names[0]);
+                } catch (NumberFormatException e) {
+                    throw new NoSuchFileException(name);
                 }
             }
-        });
+            if (names.length > 1) {
+                if (names[1].equals(ComponentEnum.files.name())) {
+                    rtrn.component = ComponentEnum.files;
+                } else if (names[1].equals(ComponentEnum.cmdline.name())) {
+                    rtrn.component = ComponentEnum.cmdline;
+                } else if (names[1].equals(ComponentEnum.mbeans.name())) {
+                    rtrn.component = ComponentEnum.mbeans;
+                } else {
+                    throw new NoSuchFileException(name);
+                }
+            }
+            if (names.length > 2) {
+                if (rtrn.component == ComponentEnum.files) {
+                    rtrn.operand = names[2];
+                } else {
+                    throw new NoSuchFileException(name);
+                }
+            }
 
-        logger.info("Shuting down process: " + id);
-        sendSignal(id, Signal.TERMINATE); // TODO possible that the process is no longer running.
+            if (names.length > 3) {
+                throw new NoSuchFileException(name);
+            }
 
-        try {
-            waitObj.acquire();
-        } catch (InterruptedException e) {
-            // Should not happen
+            return rtrn;
         }
 
-        logger.info("Process shut down: " + id);
+    }
+
+    static class PMVFSNode {
+        String pathName;
+        DirectoryFileData dfd;
+    }
+
+    class PMVFSDirectoryNode extends PMVFSNode {
+        PMVFSDirectoryNodeType nodeType;
+        Object key;
+
+        PMVFSDirectoryNode(PMVFSDirectoryNodeType type) {
+            nodeType = type;
+        }
+
+        String[] getContents() {
+
+            try {
+                if (nodeType == PMVFSDirectoryNodeType.ROOT) {
+                    String[] rtrn = new String[processMap.size()];
+                    int i = 0;
+                    for (Integer pid : processMap.keySet()) {
+                        rtrn[i++] = pid.toString();
+                    }
+                    return rtrn;
+                }
+
+                if (nodeType == PMVFSDirectoryNodeType.PID) {
+                    String[] rtrn = new String[]{ComponentEnum.cmdline.name(),ComponentEnum.files.name(), ComponentEnum.mbeans.name()};
+                    return rtrn;
+                }
+
+                if (nodeType == PMVFSDirectoryNodeType.FILES) {
+
+                    Proc proc = processMap.get(key);
+                    if (proc == null) {
+                        return new String[0];
+                    }
+
+                    ArrayList<String> fileList = new ArrayList<String>(64);
+                    List<FileAccessorStatistics> l = ns.getOpenFiles(((Integer) key).intValue());
+                    int fileCounter = 0;
+                    for (FileAccessorStatistics fas : l) {
+                        fileList.add(Integer.toString(fileCounter++));
+                    }
+                    return fileList.toArray(new String[fileList.size()]);
+                }
+                return null;
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    static class PMVFSFileNode extends PMVFSNode {
+        FileAccessorStatistics key;
+
+        String getContents() {
+            try {
+                return key.getAbsolutePathName();
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    static class PMVFSDataNode extends PMVFSNode {
+        String data;
+
+        String getContents() {
+            return data;
+        }
+    }
+
+    static class PMVFSObjectNode extends PMVFSNode {
+        Remote object;
+
+        Remote getObject() {
+            return object;
+        }
     }
 
     static class Proc {
@@ -1080,6 +1095,7 @@ class ProcessManagerServer extends JinixKernelUnicastRemoteObject implements Pro
         Map<EventName, ChildWaitObject> eventWaiters;
         Map<EventName, List<EventNotificationHandler>> eventHandlers;
         Deque<Signal> pendingSignals;
+        RMIServer platformMBeanServer;
     }
 
     private static class ChildWaitObject {

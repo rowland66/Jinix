@@ -1,10 +1,7 @@
 package org.rowland.jinix.io;
 
 import org.rowland.jinix.lang.JinixRuntime;
-import org.rowland.jinix.naming.DirectoryFileData;
-import org.rowland.jinix.naming.FileNameSpace;
-import org.rowland.jinix.naming.LookupResult;
-import org.rowland.jinix.naming.RemainingPath;
+import org.rowland.jinix.naming.*;
 import org.rowland.jinix.nio.JinixFileAttributes;
 
 import java.io.IOException;
@@ -14,6 +11,8 @@ import java.rmi.Remote;
 import java.rmi.RemoteException;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.security.PrivilegedActionException;
+import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 
 /**
@@ -97,6 +96,26 @@ public class JinixFile {
         this.path = fixPath(path);
     }
 
+    /**
+     * Construct a JinixFile from a RemoteFileHandle. This constructor is called by the JinixRuntime to provide a JinixFile
+     * to a translator. {@link org.rowland.jinix.lang.JinixRuntime#getTranslatorFile()}
+     *
+     * @param remoteFileHandle
+     */
+    public JinixFile(RemoteFileHandle remoteFileHandle) {
+        try {
+            this.path = remoteFileHandle.getPath();
+            FileNameSpace parent = remoteFileHandle.getParent();
+            parent = parent.getParent();
+            while(parent != null) {
+                this.path = parent.getPathWithinParent() + this.path;
+                parent = parent.getParent();
+            }
+        } catch (RemoteException e) {
+            throw new RuntimeException("Internal error", e);
+        }
+    }
+
     public String getName() {
         int index = path.lastIndexOf('/');
         if (index < 0) return path;
@@ -145,7 +164,7 @@ public class JinixFile {
         return new JinixFile(absPath);
     }
 
-    public String getCanonicalPath() throws IOException {
+    public String getCanonicalPath() {
         String absolutePath = getAbsolutePath();
 
         if (!absolutePath.endsWith("/")) absolutePath = absolutePath + "/";
@@ -163,7 +182,7 @@ public class JinixFile {
             if (element.equals("..")) {
                 cannonicalPathSize--;
                 if (cannonicalPathSize < 0) {
-                    throw new IOException("Invalid file path: "+getAbsolutePath());
+                    throw new RuntimeException("Invalid file path: "+getAbsolutePath());
                 }
                 continue;
             }
@@ -183,187 +202,249 @@ public class JinixFile {
         return canonicalPath;
     }
 
-    public JinixFile getCanonicalFile() throws IOException {
+    public JinixFile getCanonicalFile() {
         String canonPath = getCanonicalPath();
         return new JinixFile(canonPath);
     }
 
     public boolean exists() throws InvalidPathException {
-
-        try {
-            try {
-                LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
-                if (!(lookup.remote instanceof FileNameSpace)) {
-                    return false;
-                }
-                FileNameSpace fns = (FileNameSpace) lookup.remote;
-                return fns.exists(lookup.remainingPath);
-            } catch (RemoteException e) {
-                throw new RuntimeException(e);
-            }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        Object lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
+        return (lookup != null);
     }
 
     public boolean isDirectory() {
 
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            return new JinixFileAttributes(
-                    fns.getFileAttributes(lookup.remainingPath)).isDirectory();
-
+            Object lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
+            if (lookup instanceof RemoteFileHandle) {
+                return new JinixFileAttributes(
+                        ((RemoteFileHandle) lookup).getAttributes()).isDirectory();
+            }
+            if (lookup instanceof FileNameSpace) {
+                try {
+                    return new JinixFileAttributes(
+                            ((FileNameSpace) lookup).getParent().getFileAttributes(((FileNameSpace) lookup).getPathWithinParent()))
+                            .isDirectory();
+                } catch (RemoteException e) {
+                    e.printStackTrace();
+                }
+            }
+            return false; // Anything other than a file is not a directory
         } catch (NoSuchFileException e) {
             return false;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
         }
     }
 
     public boolean isFile() {
 
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            return new JinixFileAttributes(
-                    fns.getFileAttributes(lookup.remainingPath)).isRegularFile();
-
+            Object lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
+            if (lookup instanceof RemoteFileHandle) {
+                return new JinixFileAttributes(
+                        ((RemoteFileHandle) lookup).getAttributes()).isRegularFile();
+            }
+            return false;
         } catch (NoSuchFileException e) {
             return false;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
         }
     }
 
     public long lastModified() {
 
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            return new JinixFileAttributes(fns.getFileAttributes(
-                            lookup.remainingPath)).lastModifiedTime().toMillis();
+            Object lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
+            if (lookup instanceof RemoteFileHandle) {
+                return new JinixFileAttributes(
+                        ((RemoteFileHandle) lookup).getAttributes()).lastModifiedTime().toMillis();
+            }
+            return 0;
         } catch (ClassCastException | NoSuchFileException e) {
             return 0L;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
         }
     }
 
     public boolean setLastModified(long time) {
         try {
-            if (!exists()) {
+            if (!exists() || !isFile()) {
                 throw new RuntimeException("Failure setting lastModified");
             }
             DirectoryFileData dfd = new DirectoryFileData();
             dfd.lastModified = time;
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            fns.setFileAttributes(lookup.remainingPath, dfd);
-            return true;
+            Object lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
+            if (lookup instanceof RemoteFileHandle) {
+                ((RemoteFileHandle) lookup).setAttributes(dfd);
+            }
+            return true; // For anything other than a file just pretend the value was set
         } catch (NoSuchFileException e) {
             return false;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
         }
     }
 
     public long length() {
 
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            return new JinixFileAttributes(fns.getFileAttributes(lookup.remainingPath)).size();
+            Object lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
+            if (lookup instanceof RemoteFileHandle) {
+                return new JinixFileAttributes(
+                        ((RemoteFileHandle) lookup).getAttributes()).size();
+            }
+            return 0L;
         } catch (NoSuchFileException e) {
             return 0L;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
         }
     }
 
     public boolean delete() {
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            fns.delete(lookup.remainingPath);
-            return true;
+            Object lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
+            if (lookup instanceof RemoteFileHandle) {
+                ((RemoteFileHandle) lookup).getParent().delete(((RemoteFileHandle) lookup).getPath());
+                return true;
+            }
+            return false;
         } catch (NoSuchFileException | DirectoryNotEmptyException e) {
             return false;
-        } catch (IOException e) {
+        } catch (RemoteException e) {
             throw new RuntimeException(e);
         }
     }
 
-    public String[] list() {
-        return AccessController.doPrivileged(new PrivilegedAction<String[]>() {
-            @Override
-            public String[] run() {
-                try {
-                    LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
-                    FileNameSpace fns = (FileNameSpace) lookup.remote;
-                    return fns.list(lookup.remainingPath);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
+    public String[] list() throws NotDirectoryException {
+        try {
+            Object lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
+            if (lookup instanceof RemoteFileHandle) {
+                return ((RemoteFileHandle) lookup).getParent().list(((RemoteFileHandle) lookup).getPath());
             }
-        });
+            return null;
+        } catch (RemoteException e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    public JinixFile[] listFiles() {
+    public JinixFile[] listFiles() throws NotDirectoryException {
 
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            DirectoryFileData[] dirData = fns.listDirectoryFileData(lookup.remainingPath);
+            Object lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
+            String[] dirData = null;
+            if (lookup instanceof RemoteFileHandle) {
+                dirData = ((RemoteFileHandle) lookup).getParent()
+                        .list(((RemoteFileHandle) lookup).getPath());
+            }
+            if (lookup instanceof FileNameSpace) {
+                ((FileNameSpace) lookup).list("/");
+            }
+
+            if (dirData == null) {
+                return null;
+            }
 
             JinixFile[] rtrnJinixFile = new JinixFile[dirData.length];
             for (int i=0; i<dirData.length; i++) {
-                JinixFile jf = new JinixFile(this, dirData[i].name);
+                JinixFile jf = new JinixFile(this, dirData[i]);
                 rtrnJinixFile[i] = jf;
             }
             return rtrnJinixFile;
-        } catch (IOException e) {
+
+        } catch (RemoteException e) {
             throw new RuntimeException(e);
         }
     }
 
-    public boolean createNewFile() throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
-        FileNameSpace fns = (FileNameSpace) lookup.remote;
-        return fns.createFileAtomically(lookup.remainingPath);
+    public boolean createNewFile() throws FileAlreadyExistsException {
+        try {
+            String testPath = getCanonicalPath();
+            if (testPath.equals("/")) {
+                return false;
+            }
+            testPath = testPath.substring(0, testPath.lastIndexOf('/'));
+            Object lookup = JinixRuntime.getRuntime().lookup(testPath);
+            if (lookup instanceof RemoteFileHandle) {
+                return ((RemoteFileHandle) lookup).getParent().
+                        createFileAtomically(((RemoteFileHandle) lookup).getPath(), getName());
+            }
+            return false;
+        } catch (RemoteException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public boolean mkdir() {
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            fns.createDirectory(lookup.remainingPath);
-            return true;
+            String testPath = getCanonicalPath();
+            if (testPath.equals("/")) {
+                return false;
+            }
+            testPath = testPath.substring(0, testPath.lastIndexOf('/'));
+            Object lookup = JinixRuntime.getRuntime().lookup(testPath);
+            if (lookup instanceof RemoteFileHandle) {
+                return ((RemoteFileHandle) lookup).getParent().
+                        createDirectory(((RemoteFileHandle) lookup).getPath(), getName());
+            }
+            return false;
         } catch (FileAlreadyExistsException e) {
             return false;
-        } catch (IOException e) {
+        } catch (RemoteException e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean mkdirs() {
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            fns.createDirectories(lookup.remainingPath);
-            return true;
+            String testPath = getCanonicalPath();
+            if (testPath.equals("/")) {
+                return false;
+            }
+            String newDirectoryNames = testPath.substring(testPath.lastIndexOf('/'));
+            testPath = testPath.substring(0, testPath.lastIndexOf('/'));
+            Object lookup = JinixRuntime.getRuntime().lookup(testPath);
+            while (lookup == null) {
+                newDirectoryNames = testPath.substring(testPath.lastIndexOf('/')) + newDirectoryNames;
+                testPath = testPath.substring(0, testPath.lastIndexOf('/'));
+                lookup = JinixRuntime.getRuntime().lookup(testPath);
+            }
+
+            if (lookup instanceof RemoteFileHandle) {
+                newDirectoryNames = newDirectoryNames.substring(1) + "/";
+                String newDirectoryName = newDirectoryNames.substring(0, newDirectoryNames.indexOf('/'));
+                while (newDirectoryName != null && !newDirectoryName.isEmpty()) {
+                    ((RemoteFileHandle) lookup).getParent().
+                            createDirectory(((RemoteFileHandle) lookup).getPath(), newDirectoryName);
+
+                    newDirectoryNames = newDirectoryNames.substring(newDirectoryNames.indexOf('/') + 1);
+                    if (newDirectoryNames.isEmpty()) {
+                        break;
+                    }
+
+                    lookup = JinixRuntime.getRuntime().lookup(((RemoteFileHandle) lookup).getPath()+"/"+newDirectoryName);
+                    newDirectoryName = newDirectoryNames.substring(0, newDirectoryNames.indexOf('/'));
+                }
+                return true;
+            }
+            return false;
         } catch (FileAlreadyExistsException e) {
             return false;
-        } catch (IOException e) {
+        } catch (RemoteException e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean renameTo(JinixFile dest) {
         try {
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            fns.move(lookup.remainingPath, dest.getAbsolutePath());
+            Object srcLookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
+            String destFilePath = dest.getCanonicalPath();
+            if (destFilePath.equals("/")) {
+                return false;
+            }
+            String newFileName = destFilePath.substring(destFilePath.lastIndexOf('/'));
+            destFilePath = destFilePath.substring(0, destFilePath.lastIndexOf('/'));
+
+            Object destLookup = JinixRuntime.getRuntime().lookup(destFilePath);
+            if (destLookup == null || !(destLookup instanceof RemoteFileHandle)) {
+                return false;
+            }
+
+            ((RemoteFileHandle) srcLookup).getParent().
+                    move((RemoteFileHandle) srcLookup, (RemoteFileHandle) destLookup, newFileName);
             return true;
         } catch (NoSuchFileException | FileAlreadyExistsException e) {
             return false;

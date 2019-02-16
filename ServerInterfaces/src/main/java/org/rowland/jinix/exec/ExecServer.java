@@ -1,7 +1,9 @@
 package org.rowland.jinix.exec;
 
 import org.rowland.jinix.naming.RemoteFileAccessor;
+import org.rowland.jinix.naming.RemoteFileHandle;
 
+import javax.management.remote.rmi.RMIServer;
 import java.io.FileNotFoundException;
 import java.rmi.Remote;
 import java.rmi.RemoteException;
@@ -17,7 +19,7 @@ public interface ExecServer extends Remote {
 
     int execTranslator(String cmd,
                        String[] args,
-                       RemoteFileAccessor translatorNode,
+                       RemoteFileHandle translatorNode,
                        String translatorNodePath)
             throws FileNotFoundException, InvalidExecutableException, RemoteException;
 
@@ -50,5 +52,13 @@ public interface ExecServer extends Remote {
              RemoteFileAccessor stdErr)
             throws FileNotFoundException, InvalidExecutableException, RemoteException;
 
-    ExecLauncherData execLauncherCallback(int pid) throws RemoteException;
+    /**
+     * Called by ExecLauncher to retrieve ExecLauncherData that describes what the ExecLauncher should run.
+     *
+     * @param pid
+     * @param processMBeanServer
+     * @return
+     * @throws RemoteException
+     */
+    ExecLauncherData execLauncherCallback(int pid, RMIServer processMBeanServer) throws RemoteException;
 }

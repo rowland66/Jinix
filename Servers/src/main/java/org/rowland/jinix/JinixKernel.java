@@ -1,13 +1,9 @@
 package org.rowland.jinix;
 
-import org.rowland.jinix.exec.ExecRMIClassLoader;
 import org.rowland.jinix.exec.ExecServer;
 import org.rowland.jinix.exec.InvalidExecutableException;
 import org.rowland.jinix.logger.LogServer;
-import org.rowland.jinix.naming.FileNameSpace;
-import org.rowland.jinix.naming.LookupResult;
-import org.rowland.jinix.naming.NameSpace;
-import org.rowland.jinix.naming.RemoteFileAccessor;
+import org.rowland.jinix.naming.*;
 import org.rowland.jinix.proc.ProcessManager;
 
 import java.io.FileNotFoundException;
@@ -56,8 +52,6 @@ public class JinixKernel {
     public static void main(String[] args) {
         try {
 
-            System.setProperty("java.rmi.server.RMIClassLoaderSpi", "org.rowland.jinix.exec.ExecRMIClassLoader");
-
             setupLogging(args);
 
             setupRMI("JinixKernel", args);
@@ -74,8 +68,6 @@ public class JinixKernel {
             FileNameSpace rootFileSystem = getRootFileSystem(new String[0]);
 
             fs = new NameSpaceServer(rootFileSystem);
-
-            ((RootFileSystem) rootFileSystem).setRootNameSpace(fs);
 
             registry.rebind("root", fs);
 
@@ -101,18 +93,6 @@ public class JinixKernel {
 
             logger.info("ExecServer: Started and bound to root namespace at " + ExecServer.SERVER_NAME);
 
-            ExecRMIClassLoader.root = fs;
-
-            /*
-            try {
-                NameSpace remoteRootNameSpace = (NameSpace) getRegistry().lookup("root");
-                ExecRMIClassLoader.root = remoteRootNameSpace;
-            } catch (NotBoundException e) {
-                System.err.println("Kernel: Failed to find root namespace in RMI registry.");
-                System.exit(0);
-            }
-            */
-
             Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
                 @Override
                 public void run() {
@@ -128,9 +108,12 @@ public class JinixKernel {
             try {
                 EnumSet<StandardOpenOption> openOptions = EnumSet.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
                 NameSpace remoteRootNameSpace = (NameSpace) getRegistry().lookup("root");
-                LookupResult lookup = remoteRootNameSpace.lookup("/var/log/init.log");
-                FileNameSpace fns = (FileNameSpace) lookup.remote;
-                initLogRaf = fns.getRemoteFileAccessor(-1, lookup.remainingPath, openOptions);
+                Object lookup = remoteRootNameSpace.lookup("/var/log");
+                if (!(lookup instanceof RemoteFileHandle)) {
+                    throw new RuntimeException("Kernel: Found unexpected object at: /var/log");
+                }
+                initLogRaf = ((RemoteFileHandle) lookup).getParent().
+                        getRemoteFileAccessor(-1, "/var/log/init.log", openOptions);
             } catch (FileAlreadyExistsException e) {
                 // Should never happen as we are not using CREATE_NEW
             } catch (NoSuchFileException e) {
@@ -173,6 +156,15 @@ public class JinixKernel {
     }
 
     /**
+     * Get the root of the Jinix namespace. The root namespace is provided by the NameSpaceServer.
+     *
+     * @return the root NameSpace
+     */
+    static NameSpaceServer getNameSpaceRoot() {
+        return fs;
+    }
+
+    /**
      * Shutdown the JinixKernel by interrupting the main thread. When the main thread is interrupted, it will exit the JVM
      * and trigger the JVM shutdown hook to clean up.
      */
@@ -192,9 +184,7 @@ public class JinixKernel {
             fs.unexport();
             UnicastRemoteObject.unexportObject(registry, true);
 
-            if (ExecRMIClassLoader.getJinixProcessInstance() != null) {
-                ExecRMIClassLoader.getJinixProcessInstance().close();
-            }
+            KernelRMIClassLoader.close();
 
             shutdown = true;
             JinixKernelUnicastRemoteObject.dumpExportedObjects(System.out);
@@ -253,7 +243,10 @@ public class JinixKernel {
 
     protected static void setupRMI(String serverName, String[] args) {
 
+        // Setting useCodebaseOnly to false tells the object unmarshalling code to pass the codebase annotations that
+        // are included in the input stream to the RMI
         System.setProperty("java.rmi.server.useCodebaseOnly", "false");
+        System.setProperty("java.rmi.server.RMIClassLoaderSpi", KernelRMIClassLoader.class.getCanonicalName());
 
         String rmiModeStr = "Default";
         for (int i =0; i<args.length; i++) {
@@ -297,9 +290,6 @@ public class JinixKernel {
 
             if (!(rtrn instanceof FileNameSpace)) {
                 throw new RuntimeException("The root file system class is invalid: runAsRootFileSystem does not return a FileNameSpace");
-            }
-            if (!(rtrn instanceof RootFileSystem)) {
-                throw new RuntimeException("The root file system class is invalid: runAsRootFileSystem does not return a RootFileSystem");
             }
 
             return (FileNameSpace) rtrn;

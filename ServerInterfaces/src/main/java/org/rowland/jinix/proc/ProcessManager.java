@@ -2,22 +2,29 @@ package org.rowland.jinix.proc;
 
 import org.rowland.jinix.IllegalOperationException;
 
+import javax.management.remote.rmi.RMIServer;
 import java.io.Serializable;
 import java.rmi.Remote;
 import java.rmi.RemoteException;
 
 /**
- * Created by rsmith on 11/25/2016.
+ * The Jinix ProcessManager is responsible for all active Jinix processes. Processes are registered with the
+ * ProcessManager by the ExecServer when a process is started, and deregistered by the process when it shuts down.
+ * The ProcessManager support signaling processes and listening for process events.
  */
 public interface ProcessManager extends Remote {
 
     public final String SERVER_NAME = "/proc";
     public final String SERVER_LOGGER = "jinix.proc";
 
-    public enum EventName {CHILD, DEREGISTER, RESUME};
+    public enum EventName {
+        CHILD, //
+        DEREGISTER,
+        RESUME
+    };
 
-    public enum Signal {SHUTDOWN, // Shutdown the Jinix Kernel
-        ABORT, // Sent by the ExecLauncher to itself to signal that the launched process has exited
+    public enum Signal {
+        SHUTDOWN, // Shutdown the Jinix Kernel
         HANGUP, // Tell the process to Hangup, or to reload its configuration
         KILL, // Kill the process with extreme prejudice. The process signal handler is not be called
         TERMINATE, // Tell the process nicely to shutdown
@@ -57,6 +64,15 @@ public interface ProcessManager extends Remote {
      * @throws RemoteException
      */
     RegisterResult registerProcess(int parentId, int processGroupId, int sessionId, String cmd, String[] args) throws RemoteException;
+
+    /**
+     * Register a remote MBean server connection for the platform MBean server in a Jinix process. The platform MBean
+     * server is provided by the JVM and provide instrumentation for the Jinix process.
+     *
+     * @param id
+     * @param remoteMBeanServer
+     */
+    void registerProcessMBeanServer(int id, RMIServer remoteMBeanServer) throws RemoteException;
 
     void deRegisterProcess(int id, int exitStatus) throws RemoteException;
 

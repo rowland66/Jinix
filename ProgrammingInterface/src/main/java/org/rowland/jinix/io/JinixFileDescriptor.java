@@ -19,7 +19,7 @@ public class JinixFileDescriptor extends FileDescriptor {
 
     public static List<JinixFileDescriptor> openFileDescriptors = new LinkedList<JinixFileDescriptor>();
 
-    RemoteFileAccessor handle;
+    private RemoteFileAccessor handle;
     private Closeable parent;
     private List<Closeable> otherParents;
     private boolean closed;

@@ -1,11 +1,11 @@
 package org.rowland.jinix;
 
 import org.rowland.jinix.exec.InvalidExecutableException;
+import org.rowland.jinix.io.JinixFile;
 import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixPipe;
 import org.rowland.jinix.lang.JinixRuntime;
 import org.rowland.jinix.lang.ProcessSignalHandler;
-import org.rowland.jinix.naming.LookupResult;
 import org.rowland.jinix.naming.NameSpace;
 import org.rowland.jinix.proc.ProcessManager;
 import org.rowland.jinix.terminal.TerminalAttributes;
@@ -13,12 +13,13 @@ import org.rowland.jinix.terminal.TerminalAttributes;
 import javax.naming.Context;
 import java.io.FileNotFoundException;
 import java.rmi.Remote;
+import java.util.EnumSet;
 import java.util.Properties;
 
 public class ConsoleFakeJinixRuntime extends JinixRuntime {
 
     @Override
-    public LookupResult lookup(String path) {
+    public Object lookup(String path) {
         return null;
     }
 
@@ -113,7 +114,7 @@ public class ConsoleFakeJinixRuntime extends JinixRuntime {
     }
 
     @Override
-    public JinixFileDescriptor getTranslatorFile() {
+    public JinixFile getTranslatorFile() {
         return null;
     }
 
@@ -124,6 +125,16 @@ public class ConsoleFakeJinixRuntime extends JinixRuntime {
 
     @Override
     public void bindTranslator(Remote translator) {
+
+    }
+
+    @Override
+    public void bindTranslator(String pathName, String translatorCmd, String[] translatorArgs, EnumSet<NameSpace.BindTranslatorOption> options) throws FileNotFoundException, InvalidExecutableException {
+
+    }
+
+    @Override
+    public void unbindTranslator(String pathName, EnumSet<NameSpace.BindTranslatorOption> options) {
 
     }
 

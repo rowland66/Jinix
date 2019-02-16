@@ -2,11 +2,11 @@ package org.rowland.jinix.lang;
 
 import org.rowland.jinix.IllegalOperationException;
 import org.rowland.jinix.exec.InvalidExecutableException;
-import org.rowland.jinix.fifo.FileChannelPair;
+import org.rowland.jinix.io.JinixFile;
 import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixPipe;
-import org.rowland.jinix.naming.LookupResult;
 import org.rowland.jinix.naming.NameSpace;
+import org.rowland.jinix.naming.RemoteFileHandle;
 import org.rowland.jinix.proc.ProcessManager;
 import org.rowland.jinix.terminal.TerminalAttributes;
 
@@ -14,6 +14,7 @@ import javax.naming.Context;
 import java.io.FileNotFoundException;
 import java.nio.file.Path;
 import java.rmi.Remote;
+import java.util.EnumSet;
 import java.util.Properties;
 
 /**
@@ -64,7 +65,7 @@ public abstract class JinixRuntime {
      *
      * @return a LookupResult
      */
-    public abstract LookupResult lookup(String path);
+    public abstract Object lookup(String path);
 
     public abstract void bind(String path, Object obj);
 
@@ -233,11 +234,19 @@ public abstract class JinixRuntime {
      */
     public abstract void registerSignalHandler(ProcessSignalHandler handler);
 
-    public abstract JinixFileDescriptor getTranslatorFile();
+    public abstract JinixFile getTranslatorFile();
 
     public abstract String getTranslatorNodePath();
 
     public abstract void bindTranslator(Remote translator);
+
+    public abstract void bindTranslator(String pathName,
+                                        String translatorCmd,
+                                        String[] translatorArgs,
+                                        EnumSet<NameSpace.BindTranslatorOption> options)
+        throws FileNotFoundException, InvalidExecutableException;
+
+    public abstract void unbindTranslator(String pathName, EnumSet<NameSpace.BindTranslatorOption> options);
 
     /**
      * Register a Java native thread with the Jinix runtime. Only called internally, and calling with any thread

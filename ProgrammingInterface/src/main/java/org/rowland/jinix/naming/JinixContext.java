@@ -15,12 +15,14 @@ import java.util.Hashtable;
  * Naming Context for Jinix root namespace.
  */
 public class JinixContext implements Context {
+    String contextPath = "/";
 
     public JinixContext() {
+        contextPath = "/";
     }
 
-    public JinixContext(NameSpace rootNameSpace) {
-
+    private JinixContext(JinixContext parentContext, String subContext) {
+        contextPath = parentContext.contextPath + "/" + subContext;
     }
 
     @Override
@@ -31,25 +33,14 @@ public class JinixContext implements Context {
     @Override
     public Object lookup(String name) throws NamingException {
         if (!name.startsWith("/")) {
-            name = "/"+name;
+            name = contextPath+name;
         }
-        try {
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(name);
-            if (lookup.remote instanceof FileNameSpace && !lookup.remainingPath.equals("/")) {
-                FileNameSpace fns = (FileNameSpace) lookup.remote;
-                if (!fns.exists(lookup.remainingPath)) {
-                    throw new NameNotFoundException("No object bound at: " + name);
-                }
 
-                return fns.getRemoteFileAccessor(JinixRuntime.getRuntime().getPid(), lookup.remainingPath, EnumSet.noneOf(StandardOpenOption.class));
-            } else {
-                return lookup.remote;
-            }
-        } catch (FileAlreadyExistsException | NoSuchFileException e) {
-            throw new RuntimeException("Internal error: ", e); // This should never happen
-        } catch (RemoteException e) {
-            throw new RuntimeException(e);
+        Object lookup = JinixRuntime.getRuntime().lookup(name);
+        if (lookup == null) {
+            throw new NameNotFoundException("No object bound at: " + name);
         }
+        return lookup;
     }
 
     @Override
@@ -122,22 +113,22 @@ public class JinixContext implements Context {
 
     @Override
     public void destroySubcontext(String name) throws NamingException {
-                throw new OperationNotSupportedException();
+        throw new OperationNotSupportedException();
     }
 
     @Override
     public Context createSubcontext(Name name) throws NamingException {
-                throw new OperationNotSupportedException();
+        throw new OperationNotSupportedException();
     }
 
     @Override
     public Context createSubcontext(String name) throws NamingException {
-                throw new OperationNotSupportedException();
+        return new JinixContext(this, name);
     }
 
     @Override
     public Object lookupLink(Name name) throws NamingException {
-                throw new OperationNotSupportedException();
+        throw new OperationNotSupportedException();
     }
 
     @Override

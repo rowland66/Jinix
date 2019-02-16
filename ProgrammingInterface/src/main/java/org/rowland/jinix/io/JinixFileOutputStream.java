@@ -1,8 +1,7 @@
 package org.rowland.jinix.io;
 
 import org.rowland.jinix.lang.JinixRuntime;
-import org.rowland.jinix.naming.FileNameSpace;
-import org.rowland.jinix.naming.LookupResult;
+import org.rowland.jinix.naming.RemoteFileHandle;
 import org.rowland.jinix.nio.JinixFileChannel;
 import org.rowland.jinix.terminal.TerminalBlockedOperationException;
 
@@ -16,8 +15,6 @@ import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
 import java.rmi.NoSuchObjectException;
 import java.rmi.RemoteException;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Set;
 
@@ -41,9 +38,25 @@ public class JinixFileOutputStream extends OutputStream {
             }
 
             int pid = JinixRuntime.getRuntime().getPid();
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(file.getCanonicalPath());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            fd = new JinixFileDescriptor(fns.getRemoteFileAccessor(pid, lookup.remainingPath, options));
+            Object lookup = JinixRuntime.getRuntime().lookup(file.getCanonicalPath());
+            if (lookup == null) {
+                String filePath = file.getCanonicalPath();
+                String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+                String directoryPath = filePath.substring(0, filePath.lastIndexOf('/'));
+                lookup = JinixRuntime.getRuntime().lookup(directoryPath);
+                if (lookup instanceof RemoteFileHandle) {
+                    fd = new JinixFileDescriptor(((RemoteFileHandle) lookup).getParent().
+                            getRemoteFileAccessor(pid, ((RemoteFileHandle) lookup).getPath() + "/" + fileName, options));
+                    return;
+                }
+            } else {
+                if (lookup instanceof RemoteFileHandle) {
+                    fd = new JinixFileDescriptor(((RemoteFileHandle) lookup).getParent().
+                            getRemoteFileAccessor(pid, ((RemoteFileHandle) lookup).getPath(), options));
+                    return;
+                }
+            }
+            throw new FileNotFoundException(file.getAbsolutePath());
         } catch (NoSuchFileException | FileAlreadyExistsException e) {
             throw new RuntimeException("Unexpected internal error", e); // This should never happen with options
         } catch (IOException e) {
@@ -116,7 +129,7 @@ public class JinixFileOutputStream extends OutputStream {
 
     @Override
     public void flush() throws IOException {
-        fd.getHandle().flush();
+        fd.getHandle().force(true);
     }
 
     @Override

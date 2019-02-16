@@ -1,18 +1,13 @@
 package org.rowland.jinix.nio;
 
 import org.rowland.jinix.lang.JinixRuntime;
-import org.rowland.jinix.naming.DirectoryFileData;
-import org.rowland.jinix.naming.FileNameSpace;
-import org.rowland.jinix.naming.LookupResult;
-import org.rowland.jinix.naming.RemainingPath;
+import org.rowland.jinix.naming.*;
 
 import java.io.IOException;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributeView;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
-import java.rmi.Remote;
 import java.util.*;
 
 /**
@@ -148,17 +143,23 @@ public class JinixFileAttributeView implements BasicFileAttributeView {
 
     @Override
     public JinixFileAttributes readAttributes() throws IOException {
-        LookupResult lookup = JinixRuntime.getRuntime().lookup(p.toAbsolutePath().toString());
-        if (!(lookup.remote instanceof FileNameSpace)) {
-            DirectoryFileData dfd = new DirectoryFileData();
-            dfd.name = p.getFileName().toString();
-            dfd.lastModified = 0;
-            dfd.length = 0;
-            dfd.type = DirectoryFileData.FileType.FILE;
-            return new JinixFileAttributes(dfd);
+        Object lookup = JinixRuntime.getRuntime().lookup(p.toAbsolutePath().toString());
+
+        if (lookup instanceof RemoteFileHandle) {
+            return new JinixFileAttributes(((RemoteFileHandle) lookup).getAttributes());
         }
-        FileNameSpace fns = (FileNameSpace) lookup.remote;
-        DirectoryFileData dfd = fns.getFileAttributes(lookup.remainingPath);
+
+        if (lookup instanceof FileNameSpace) {
+            return new JinixFileAttributes(((FileNameSpace) lookup).getParent().
+                    getFileAttributes(((FileNameSpace) lookup).getPathWithinParent()));
+        }
+
+        // Default attributes for anything else
+        DirectoryFileData dfd = new DirectoryFileData();
+        dfd.name = p.getFileName().toString();
+        dfd.lastModified = 0;
+        dfd.length = 0;
+        dfd.type = DirectoryFileData.FileType.FILE;
         return new JinixFileAttributes(dfd);
     }
 
@@ -177,9 +178,13 @@ public class JinixFileAttributeView implements BasicFileAttributeView {
         if (lastModifiedTime != null) {
             DirectoryFileData dfd = new DirectoryFileData();
             dfd.lastModified = lastModifiedTime.toMillis();
-            LookupResult lookup = JinixRuntime.getRuntime().lookup(p.toAbsolutePath().toString());
-            FileNameSpace fns = (FileNameSpace) lookup.remote;
-            fns.setFileAttributes(lookup.remainingPath, dfd);
+            Object lookup = JinixRuntime.getRuntime().lookup(p.toAbsolutePath().toString());
+            if (lookup instanceof RemoteFileHandle) {
+                ((RemoteFileHandle) lookup).setAttributes(dfd);
+            }
+            if (lookup instanceof FileNameSpace) {
+                ((FileNameSpace) lookup).getParent().setFileAttributes(((FileNameSpace) lookup).getPathWithinParent(), dfd);
+            }
         }
     }
 }

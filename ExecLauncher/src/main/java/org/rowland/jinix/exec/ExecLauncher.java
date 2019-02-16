@@ -1,12 +1,8 @@
 package org.rowland.jinix.exec;
 
-import org.rowland.jinix.IllegalOperationException;
 import org.rowland.jinix.JinixKernelUnicastRemoteObject;
 import org.rowland.jinix.fifo.FifoServer;
-import org.rowland.jinix.io.JinixFileDescriptor;
-import org.rowland.jinix.io.JinixFileInputStream;
-import org.rowland.jinix.io.JinixFileOutputStream;
-import org.rowland.jinix.io.JinixPipe;
+import org.rowland.jinix.io.*;
 import org.rowland.jinix.lang.JinixRuntime;
 import org.rowland.jinix.lang.JinixSystem;
 import org.rowland.jinix.lang.ProcessSignalHandler;
@@ -16,8 +12,12 @@ import org.rowland.jinix.proc.ProcessManager;
 import org.rowland.jinix.terminal.TermServer;
 import org.rowland.jinix.terminal.TerminalAttributes;
 
+import javax.management.MBeanServer;
+import javax.management.remote.JMXConnectorServerFactory;
+import javax.management.remote.rmi.RMIServer;
 import javax.naming.Context;
 import java.io.*;
+import java.lang.management.ManagementFactory;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -52,7 +52,7 @@ public class ExecLauncher {
     private static JinixFileDescriptor stdIn;
     private static JinixFileDescriptor stdOut;
     private static JinixFileDescriptor stdErr;
-    private static JinixFileDescriptor translatorNode;
+    private static JinixFile translatorNode;
     private static String translatorNodePath;
     private static ThreadGroup execThreadGroup;
     private static boolean nativeAccess = false;
@@ -73,19 +73,24 @@ public class ExecLauncher {
     private static int exitStatus = -1;
     private static boolean translatorBound = false;
 
+    private static ExecLauncherJMXRMIServer platformMBeanServerRMIServer;
+
     public static void launch(int pid, int pgid) {
 
         try {
             Runtime.getRuntime().addShutdownHook(new ExecLauncherShutdownThread());
-
-            JinixRuntime.setJinixRuntime(new JinixRuntimeImpl());
 
             ExecLauncher.pid = pid;
             ExecLauncher.pgid = pgid;
 
             runtimeThreads = new LinkedList<>();
 
-            ExecLauncherData execLaunchData = es.execLauncherCallback(pid);
+            MBeanServer platformMBeanServer = ManagementFactory.getPlatformMBeanServer();
+            platformMBeanServerRMIServer = new ExecLauncherJMXRMIServer(platformMBeanServer, ExecLauncher.class.getClassLoader());
+
+            ExecLauncherData execLaunchData = es.execLauncherCallback(pid, platformMBeanServerRMIServer);
+
+            JinixRuntime.setJinixRuntime(new JinixRuntimeImpl());
 
             execCmd = execLaunchData.cmd;
             execArgs = execLaunchData.args;
@@ -107,7 +112,7 @@ public class ExecLauncher {
 
                 setupJinixEnvironment(execLaunchData.environment);
             } else {
-                translatorNode = new JinixFileDescriptor(execLaunchData.translatorNode);
+                translatorNode = new JinixFile(execLaunchData.translatorNode);
                 translatorNodePath = execLaunchData.translatorNodePath;
                 Properties env = getTranslatorEnvironment();
                 setupJinixEnvironment(env);
@@ -366,8 +371,8 @@ public class ExecLauncher {
 
             try {
                 rootNameSpace = (NameSpace) registry.lookup("root");
-                es = (ExecServer) (rootNameSpace.lookup(ExecServer.SERVER_NAME)).remote;
-                pm = (ProcessManager) rootNameSpace.lookup(ProcessManager.SERVER_NAME).remote;
+                es = (ExecServer) (rootNameSpace.lookup(ExecServer.SERVER_NAME));
+                pm = (ProcessManager) rootNameSpace.lookup(ProcessManager.SERVER_NAME);
             } catch (NotBoundException e) {
                 System.err.println("ExecLauncher: Failed to locate root NameSpace in RMI Registry");
                 return;
@@ -474,8 +479,6 @@ public class ExecLauncher {
             }
 
             if (ExecLauncher.translatorNode != null) {
-                ExecLauncher.translatorNode.close();
-
                 if (!translatorBound) {
                     try {
                         rootNameSpace.translatorFailure(translatorNodePath);
@@ -517,6 +520,12 @@ public class ExecLauncher {
                 pm.deRegisterProcess(pid, ExecLauncher.exitStatus);
             } catch (RemoteException e) {
                 // Ignore as the state update can be skipped
+            }
+
+            try {
+                platformMBeanServerRMIServer.close();
+            } catch (IOException e) {
+                // Ignore as we are shutting down anyway
             }
         }
     }
@@ -589,7 +598,7 @@ public class ExecLauncher {
     static synchronized void getTerminalServer() {
         if (ts == null) {
             try {
-                ts = (TermServer) rootNameSpace.lookup(TermServer.SERVER_NAME).remote;
+                ts = (TermServer) rootNameSpace.lookup(TermServer.SERVER_NAME);
             } catch (RemoteException e) {
                 System.err.println("Jinix critical error: failed to find terminal server at "+TermServer.SERVER_NAME);
             }
@@ -598,7 +607,7 @@ public class ExecLauncher {
     public static class JinixRuntimeImpl extends JinixRuntime {
 
         @Override
-        public LookupResult lookup(String path) {
+        public Object lookup(String path) {
             try {
                 return rootNameSpace.lookup(pid, path);
             } catch (RemoteException e) {
@@ -619,7 +628,23 @@ public class ExecLauncher {
                 }
                 throw new RuntimeException("Transport error", e);
             }
+        }
 
+        @Override
+        public void bindTranslator(String pathName,
+                                   String translatorCmd,
+                                   String[] translatorArgs,
+                                   EnumSet<NameSpace.BindTranslatorOption> options)
+            throws FileNotFoundException, InvalidExecutableException
+        {
+            try {
+                rootNameSpace.bindTranslator(pathName, translatorCmd, translatorArgs, options);
+            } catch (RemoteException e) {
+                if (e.getCause() != null) {
+                    throw new RuntimeException("Internal error", e.getCause());
+                }
+                throw new RuntimeException("Transport error", e);
+            }
         }
 
         @Override
@@ -635,8 +660,20 @@ public class ExecLauncher {
         }
 
         @Override
+        public void unbindTranslator(String pathName, EnumSet<NameSpace.BindTranslatorOption> options) {
+            try {
+                rootNameSpace.unbindTranslator(pathName, options);
+            } catch (RemoteException e) {
+                if (e.getCause() != null) {
+                    throw new RuntimeException("Internal error", e.getCause());
+                }
+                throw new RuntimeException("Transport error", e);
+            }
+        }
+
+        @Override
         public Context getNamingContext() {
-            return new JinixContext(rootNameSpace);
+            return new JinixContext();
         }
 
         @Override
@@ -752,7 +789,7 @@ public class ExecLauncher {
         @Override
         public JinixPipe pipe() {
             try {
-                FifoServer fs = (FifoServer) rootNameSpace.lookup(FifoServer.SERVER_NAME).remote;
+                FifoServer fs = (FifoServer) lookup(FifoServer.SERVER_NAME);
                 return new JinixPipe(fs.openPipe());
             } catch (RemoteException e) {
                 throw new RuntimeException(e);
@@ -783,7 +820,7 @@ public class ExecLauncher {
         }
 
         @Override
-        public JinixFileDescriptor getTranslatorFile() {
+        public JinixFile getTranslatorFile() {
             if (translatorNode == null && translatorNodePath == null) {
                 return null;
             }

@@ -1,6 +1,7 @@
 package org.rowland.jinix.exec;
 
 import org.rowland.jinix.naming.RemoteFileAccessor;
+import org.rowland.jinix.naming.RemoteFileHandle;
 
 import java.io.Serializable;
 import java.util.Properties;
@@ -16,6 +17,6 @@ public class ExecLauncherData implements Serializable {
     public RemoteFileAccessor stdIn;
     public RemoteFileAccessor stdOut;
     public RemoteFileAccessor stdErr;
-    public RemoteFileAccessor translatorNode;
+    public RemoteFileHandle translatorNode;
     public String translatorNodePath;
 }

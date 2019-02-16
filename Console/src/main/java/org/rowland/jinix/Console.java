@@ -7,10 +7,7 @@ import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixFileOutputStream;
 import org.rowland.jinix.io.JinixFileInputStream;
 import org.rowland.jinix.lang.JinixRuntime;
-import org.rowland.jinix.naming.FileNameSpace;
-import org.rowland.jinix.naming.LookupResult;
-import org.rowland.jinix.naming.NameSpace;
-import org.rowland.jinix.naming.RemoteFileAccessor;
+import org.rowland.jinix.naming.*;
 import org.rowland.jinix.proc.ProcessManager;
 import org.rowland.jinix.terminal.LocalMode;
 import org.rowland.jinix.terminal.TermServer;
@@ -44,24 +41,27 @@ public class Console {
             Registry registry = getRegistry();
             NameSpace fs = (NameSpace) registry.lookup("root");
 
-            TermServer t = (TermServer) fs.lookup(TermServer.SERVER_NAME).remote;
+            TermServer t = (TermServer) fs.lookup(TermServer.SERVER_NAME);
 
             short terminalId = t.createTerminal();
             JinixFileDescriptor masterFileDescriptor = new JinixFileDescriptor(t.getTerminalMaster(terminalId));
             JinixFileDescriptor slaveFileDescriptor = new JinixFileDescriptor(t.getTerminalSlave(terminalId));
 
-            ExecServer es = (ExecServer) fs.lookup(ExecServer.SERVER_NAME).remote;
+            ExecServer es = (ExecServer) fs.lookup(ExecServer.SERVER_NAME);
 
-            ProcessManager pm = (ProcessManager) fs.lookup(ProcessManager.SERVER_NAME).remote;
+            ProcessManager pm = (ProcessManager) fs.lookup(ProcessManager.SERVER_NAME);
 
             //"-Xdebug","-Xrunjdwp:transport=dt_socket,address=5555,server=y,suspend=y",
             RemoteFileAccessor environmentRaf = null;
             try {
                 EnumSet<StandardOpenOption> openOptions = EnumSet.of(StandardOpenOption.READ);
                 NameSpace remoteRootNameSpace = (NameSpace) getRegistry().lookup("root");
-                LookupResult lookup = remoteRootNameSpace.lookup("/config/environment.config");
-                FileNameSpace fns = (FileNameSpace) lookup.remote;
-                environmentRaf = fns.getRemoteFileAccessor(-1, lookup.remainingPath, openOptions);
+                Object lookup = remoteRootNameSpace.lookup("/config/environment.config");
+                if (lookup == null || !(lookup instanceof RemoteFileHandle)) {
+                    throw new NoSuchFileException("");
+                }
+                environmentRaf = ((RemoteFileHandle) lookup).getParent().
+                        getRemoteFileAccessor(-1, ((RemoteFileHandle) lookup).getPath(), openOptions);
             } catch (FileAlreadyExistsException e) {
                 // Should never happen as we are not using CREATE_NEW
             } catch (NoSuchFileException e) {

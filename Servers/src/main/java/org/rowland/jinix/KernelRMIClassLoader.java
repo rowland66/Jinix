@@ -1,7 +1,8 @@
-package org.rowland.jinix.exec;
+package org.rowland.jinix;
 
-import org.rowland.jinix.lang.JinixRuntime;
-import org.rowland.jinix.naming.*;
+import org.rowland.jinix.exec.ExecClassLoader;
+import org.rowland.jinix.naming.RemoteFileHandle;
+import org.rowland.jinix.naming.RemoteJarFileAccessor;
 
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
@@ -11,29 +12,21 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardOpenOption;
 import java.rmi.RemoteException;
 import java.rmi.server.RMIClassLoaderSpi;
-import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * The Jinix RMIClassLoader implementation. This classloader maintains a map of ExecClassLoaders for all codebases that
- * the Jinix process has encountered. An instance of this class will exist in every Jinix process including the kernel.
- * This class is not secure, and this class probably breaks any standalone use of RMI in Jinix process.
+ * The RMI ClassLoader that runs in the Jinix kernel process. This ClassLoader uses the codebase URL's to load classes from
+ * jar files in the Jinix root NameSpace. This allows Jinix processes to provide implementations of interfaces in kernel
+ * server remote method calls.
  */
-public class ExecRMIClassLoader extends RMIClassLoaderSpi {
+public class KernelRMIClassLoader extends RMIClassLoaderSpi{
 
     private static Map<String, ExecClassLoader> codebaseLoaderMap = new HashMap<>();
 
-    private static ExecRMIClassLoader jinixProcessInstance;
-
-    public static ExecRMIClassLoader getJinixProcessInstance() {
-        return jinixProcessInstance;
-    }
-
-    public ExecRMIClassLoader() {
+    public KernelRMIClassLoader() {
         super();
-        jinixProcessInstance = this;
     }
 
     @Override
@@ -49,16 +42,16 @@ public class ExecRMIClassLoader extends RMIClassLoaderSpi {
             }
         }
 
-        // The parent classloader is just the context classloader associated with the thread. For a Jinix process, this
-        // will always be an ExecClassLoader that loads classes from the processes executable jar.
-        ClassLoader parent = getRMIContextClassLoader();
-
         // If a codebase is provided, get a loader for the codebase. These loaders are cached using codebase as the key.
         // Each codebase classloader has the processes primary ExecClassLoader as a parent and defers loading to the parent.
         ClassLoader loader = null;
         if (codebase != null) {
             loader = getClassLoader(codebase);
         }
+
+        // The parent classloader is just the context classloader associated with the thread. On RMI threads, this will
+        // be the ApplicationClassLoader.
+        ClassLoader parent = getRMIContextClassLoader();
 
         try {
             return Class.forName(name, false, (loader != null ? loader : parent));
@@ -102,14 +95,21 @@ public class ExecRMIClassLoader extends RMIClassLoaderSpi {
 
         ClassLoader parent = getRMIContextClassLoader();
 
-        if (JinixRuntime.getRuntime() == null) {
+        try {
+            Object lookup = JinixKernel.getNameSpaceRoot().lookup(codebase);
+            if (lookup == null || !(lookup instanceof RemoteFileHandle)) {
+                return null;
+            }
+            RemoteJarFileAccessor remoteJarAccessor = (RemoteJarFileAccessor) ((RemoteFileHandle) lookup).getParent().
+                    getRemoteFileAccessor(-1, ((RemoteFileHandle) lookup).getPath(), EnumSet.of(StandardOpenOption.READ));
+            ExecClassLoader cl = new ExecClassLoader(codebase, false, remoteJarAccessor, parent);
+            codebaseLoaderMap.put(codebase, cl);
+            return cl;
+        } catch (RemoteException e) {
+            throw new RuntimeException("Internal error", e);
+        } catch (FileAlreadyExistsException | NoSuchFileException e) {
             return null;
         }
-
-        // If we get here, we are running within ExecLauncher
-        ExecClassLoader cl = new ExecClassLoader(codebase, false, parent);
-        codebaseLoaderMap.put(codebase, cl);
-        return cl;
     }
 
     @Override
@@ -144,7 +144,7 @@ public class ExecRMIClassLoader extends RMIClassLoaderSpi {
      * Close all of the codebase ClassLoaders opened during the life of the process. This method should be called when
      * the Jinix process shuts down.
      */
-    public void close() {
+    static void close() {
         for (ExecClassLoader cl : codebaseLoaderMap.values()) {
             cl.close();
         }
@@ -271,5 +271,6 @@ public class ExecRMIClassLoader extends RMIClassLoaderSpi {
         }
         return nonpublicLoader;
     }
+
 
 }
