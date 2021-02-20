@@ -83,7 +83,7 @@ public class JinixKernel {
 
             logger.info("ProcessManager: Started and bound to root namespace at " + ProcessManager.SERVER_NAME);
 
-            String javaHome = System.getenv("JAVA_HOME");
+            String javaHome = System.getenv("JINIX_JAVA_HOME");
             if (javaHome != null) {
                 logger.info("ExecServer: Executing java from: "+javaHome);
             }

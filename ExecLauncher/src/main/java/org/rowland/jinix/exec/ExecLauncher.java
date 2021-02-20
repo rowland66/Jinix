@@ -11,17 +11,16 @@ import org.rowland.jinix.nio.JinixPath;
 import org.rowland.jinix.proc.ProcessManager;
 import org.rowland.jinix.terminal.TermServer;
 import org.rowland.jinix.terminal.TerminalAttributes;
+import org.rowland.jinixspi.JinixRuntimeSP;
+import org.rowland.jinixspi.JinixServiceProviderFactory;
 
 import javax.management.MBeanServer;
-import javax.management.remote.JMXConnectorServerFactory;
-import javax.management.remote.rmi.RMIServer;
 import javax.naming.Context;
 import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.file.Path;
 import java.rmi.NotBoundException;
@@ -30,7 +29,9 @@ import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.RMISocketFactory;
+import java.security.AccessController;
 import java.security.Policy;
+import java.security.PrivilegedAction;
 import java.util.*;
 import java.util.logging.*;
 import java.util.logging.Formatter;
@@ -44,7 +45,7 @@ import java.util.logging.Formatter;
  */
 public class ExecLauncher {
 
-    private static int pid, pgid;
+    private static int pid, pgid, terminalid;
     private static NameSpace rootNameSpace;
     private static ExecServer es;
     private static ProcessManager pm;
@@ -90,6 +91,7 @@ public class ExecLauncher {
 
             ExecLauncherData execLaunchData = es.execLauncherCallback(pid, platformMBeanServerRMIServer);
 
+            JinixServiceProviderFactory.setFactoryImpl(new JinixServiceProviderFactoryImplementorImpl());
             JinixRuntime.setJinixRuntime(new JinixRuntimeImpl());
 
             execCmd = execLaunchData.cmd;
@@ -345,14 +347,14 @@ public class ExecLauncher {
 
         int pid;
         try {
-            pid = Integer.valueOf(args[0]);
+            pid = Integer.parseInt(args[0]);
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("First parameter (PID) must be a valid integer: " + args[0]);
         }
 
         int pgid;
         try {
-            pgid = Integer.valueOf(args[1]);
+            pgid = Integer.parseInt(args[1]);
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Second parameter (PGID) must be a valid integer: " + args[1]);
         }
@@ -440,11 +442,6 @@ public class ExecLauncher {
                                 ExecLauncher.resume();
                             }
                             break;
-                        case CHILD:
-                            if (signalHandler != null) {
-                                signalHandler.handleSignal(signal);
-                            }
-                            break;
                         case TERMINAL_INPUT:
                             if (signalHandler == null || !signalHandler.handleSignal(signal)) {
                                 ExecLauncher.suspend();
@@ -455,6 +452,10 @@ public class ExecLauncher {
                                 ExecLauncher.suspend();
                             }
                             break;
+                        default:
+                            if (signalHandler != null) {
+                                signalHandler.handleSignal(signal);
+                            }
                     }
                 }
             } catch (RemoteException e) {
@@ -462,6 +463,7 @@ public class ExecLauncher {
             }
         }
     }
+
     static private class ExecLauncherShutdownThread extends Thread {
 
         public ExecLauncherShutdownThread() {
@@ -555,24 +557,12 @@ public class ExecLauncher {
                     e.printStackTrace(System.err);
                 }
             } finally {
-
+                try {
+                    platformMBeanServerRMIServer.close();
+                } catch (IOException e) {
+                    // Ignore since we are shutting down.
+                }
                 JinixKernelUnicastRemoteObject.dumpExportedObjects(System.out);
-                /**
-                boolean livingThread = false;
-                do {
-                    livingThread = false;
-                    for (Thread t : runtimeThreads) {
-                        if (t != Thread.currentThread() && !t.isDaemon() && t.isAlive()) {
-                            livingThread = true;
-                            System.out.println("Living thread: "+t.getName());
-                            try {
-                                t.join();
-                            } catch (InterruptedException e) {
-                                // this should never happen
-                            }
-                        }
-                    }
-                } while (livingThread); */
             }
         }
     }
@@ -604,7 +594,7 @@ public class ExecLauncher {
             }
         }
     }
-    public static class JinixRuntimeImpl extends JinixRuntime {
+    public static class JinixRuntimeImpl extends JinixRuntime implements JinixRuntimeSP {
 
         @Override
         public Object lookup(String path) {
@@ -842,10 +832,26 @@ public class ExecLauncher {
             }
         }
 
-        @Override
         public synchronized void registerJinixThread(Thread t) {
             if (!runtimeThreads.contains(t)) {
                 runtimeThreads.add(t);
+            }
+        }
+
+        public synchronized void unregisterJinixThread(Thread t) {
+            if (runtimeThreads.contains(t)) {
+                runtimeThreads.remove(t);
+            }
+            long activeThread = runtimeThreads.stream()
+                    .filter(r -> !r.isDaemon())
+                    .count();
+
+            if (activeThread == 0) {
+                try {
+                    platformMBeanServerRMIServer.close();
+                } catch (IOException e) {
+                    // Ignore any error here.
+                }
             }
         }
 
@@ -928,12 +934,49 @@ public class ExecLauncher {
                 throw new IllegalArgumentException("Exit called with invalid status: "+status);
             }
             exitStatus = status;
-            System.exit(0);
+            AccessController.doPrivileged(new PrivilegedAction<Object>() {
+                @Override
+                public Object run() {
+                    System.exit(0);
+                    return null;
+                }
+            });
         }
 
         @Override
         public void addLibraryToClassloader(String jarFile) {
             execCL.addLibraryToClasspath(jarFile);
+        }
+
+        @Override
+        public int getTerminalColumns() {
+            getTerminalServer();
+            try {
+                return ts.getTerminalColumns(getProcessTerminalId());
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public int getTerminalLines() {
+            getTerminalServer();
+            try {
+                return ts.getTerminalLines(getProcessTerminalId());
+            } catch (RemoteException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public Process createJinixProcess(String[] cmdargs,
+                                          Map<String, String> environment,
+                                          String dir,
+                                          ProcessBuilder.Redirect[] redirects,
+                                          boolean redirectErrorStream)
+                throws IOException {
+
+            return JinixProcess.start(cmdargs, environment, dir, redirects, redirectErrorStream);
         }
     }
 }

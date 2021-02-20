@@ -48,4 +48,12 @@ public interface TermServer extends Remote {
     void linkProcessToTerminal(short termId, int pid) throws RemoteException;
 
     void setTerminalForegroundProcessGroup(short termId, int processGroupId) throws RemoteException;
+
+    int getTerminalForegroundProcessGroup(short termId) throws RemoteException;
+
+    void setTerminalSize(short termId, int columns, int lines) throws RemoteException;
+
+    int getTerminalColumns(short termId) throws RemoteException;
+
+    int getTerminalLines(short termId) throws RemoteException;
 }

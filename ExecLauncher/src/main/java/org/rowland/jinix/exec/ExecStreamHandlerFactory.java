@@ -1,5 +1,7 @@
 package org.rowland.jinix.exec;
 
+import org.rowland.jinix.JinixFileStreamHandler;
+
 import java.net.URLStreamHandler;
 import java.net.URLStreamHandlerFactory;
 

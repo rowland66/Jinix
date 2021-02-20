@@ -1,7 +1,7 @@
 package org.rowland.jinix.exec;
 
-import org.rowland.jinix.io.JinixFileDescriptor;
-import org.rowland.jinix.io.JinixFileInputStream;
+
+import org.rowland.jinix.JinixFileStreamHandler;
 import org.rowland.jinix.lang.JinixRuntime;
 import org.rowland.jinix.lang.JinixSystem;
 import org.rowland.jinix.naming.*;
@@ -9,12 +9,9 @@ import org.rowland.jinix.naming.*;
 import javax.naming.Context;
 import javax.naming.NameNotFoundException;
 import javax.naming.NamingException;
-import java.io.BufferedInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.nio.channels.NonReadableChannelException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardOpenOption;

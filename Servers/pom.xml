@@ -13,15 +13,28 @@
   <name>Jinix Servers</name>
   
   <dependencies>
-	<dependency>
-		<groupId>org.rowland.jinix</groupId>
-		<artifactId>ServerInterfaces</artifactId>
-		<version>0.1-SNAPSHOT</version>
-	</dependency>
-	<dependency>
-		<groupId>org.rowland.jinix</groupId>
-		<artifactId>ProgrammingInterface</artifactId>
-		<version>0.1-SNAPSHOT</version>
-	</dependency>
+	  <dependency>
+		  <groupId>org.rowland.jinix</groupId>
+		  <artifactId>ServerInterfaces</artifactId>
+		  <version>${project.version}</version>
+	  </dependency>
+    <dependency>
+      <groupId>org.rowland.jinix</groupId>
+      <artifactId>ProgrammingInterface</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.kohlschutter.junixsocket</groupId>
+      <artifactId>junixsocket-rmi</artifactId>
+      <scope>runtime</scope>
+    </dependency>
   </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>maven-dependency-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+
 </project>

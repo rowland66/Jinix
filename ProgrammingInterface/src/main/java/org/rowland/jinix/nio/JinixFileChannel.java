@@ -209,4 +209,7 @@ public class JinixFileChannel extends FileChannel {
             throw new ClosedChannelException();
     }
 
+    public Object getParent() {
+        return this.parent;
+    }
 }

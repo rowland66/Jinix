@@ -1,6 +1,6 @@
 package org.rowland.jinix.exec;
 
-import sun.rmi.server.UnicastServerRef;
+//import sun.rmi.server.UnicastServerRef;
 
 import javax.management.MBeanServer;
 import javax.management.remote.rmi.RMIConnection;
@@ -13,7 +13,7 @@ import java.rmi.server.UnicastRemoteObject;
 import java.util.HashMap;
 import java.util.Map;
 
-public class ExecLauncherJMXRMIServer extends  RMIServerImpl {
+public class ExecLauncherJMXRMIServer extends RMIServerImpl {
 
     private static int connectionId = 0;
 
@@ -34,8 +34,7 @@ public class ExecLauncherJMXRMIServer extends  RMIServerImpl {
 
     @Override
     protected void export() throws IOException {
-        // We use this unusual means of exporting the RMIServer to prevent the RMIServer from block VM shutdown
-        new UnicastServerRef(0).exportObject(this, null, true);
+        UnicastRemoteObject.exportObject(this, 0);
     }
 
     @Override

@@ -1,0 +1,412 @@
+diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixAccess.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixAccess.java
+new file mode 100644
+index 0000000000..6441a17510
+--- /dev/null
++++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixAccess.java
+@@ -0,0 +1,19 @@
++package org.rowland.jinixspi;
++
++import java.security.AccessControlException;
++
++public class JinixAccess {
++
++    public static boolean isJinix() {
++        SecurityManager securityManager = System.getSecurityManager();
++
++        if (securityManager != null) {
++            try {
++                securityManager.checkPermission(new JinixNativeAccessPermission());
++            } catch (AccessControlException e) {
++                return true;
++            }
++        }
++        return false;
++    }
++}
+diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixFileDescriptorSP.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixFileDescriptorSP.java
+new file mode 100644
+index 0000000000..4edf145546
+--- /dev/null
++++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixFileDescriptorSP.java
+@@ -0,0 +1,6 @@
++package org.rowland.jinixspi;
++
++public interface JinixFileDescriptorSP {
++
++    void close();
++}
+diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixFileInputStreamSP.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixFileInputStreamSP.java
+new file mode 100644
+index 0000000000..629c803b38
+--- /dev/null
++++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixFileInputStreamSP.java
+@@ -0,0 +1,13 @@
++package org.rowland.jinixspi;
++
++import java.io.FileDescriptor;
++import java.io.IOException;
++import java.io.InputStream;
++import java.nio.channels.FileChannel;
++
++public abstract class JinixFileInputStreamSP extends InputStream {
++
++    public abstract FileDescriptor getFD() throws IOException;
++
++    public abstract FileChannel getChannel();
++}
+diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixFileOutputStreamSP.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixFileOutputStreamSP.java
+new file mode 100644
+index 0000000000..b679bf2732
+--- /dev/null
++++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixFileOutputStreamSP.java
+@@ -0,0 +1,13 @@
++package org.rowland.jinixspi;
++
++import java.io.FileDescriptor;
++import java.io.IOException;
++import java.io.OutputStream;
++import java.nio.channels.FileChannel;
++
++public abstract class JinixFileOutputStreamSP extends OutputStream {
++
++    public abstract FileDescriptor getFD() throws IOException;
++
++    public abstract FileChannel getChannel();
++}
+diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixFileSP.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixFileSP.java
+new file mode 100644
+index 0000000000..3764400e11
+--- /dev/null
++++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixFileSP.java
+@@ -0,0 +1,63 @@
++package org.rowland.jinixspi;
++
++import java.io.IOException;
++import java.nio.file.NotDirectoryException;
++import java.nio.file.Path;
++
++public interface JinixFileSP {
++
++    String getName();
++
++    String getParent();
++
++    String getPath();
++
++    JinixFileSP getParentFile();
++
++    boolean isAbsolute();
++
++    String getAbsolutePath();
++
++    JinixFileSP getAbsoluteFile();
++
++    String getCanonicalPath();
++
++    JinixFileSP getCanonicalFile();
++
++    boolean exists();
++
++    boolean isDirectory();
++
++    boolean isFile();
++
++    long lastModified();
++
++    long length();
++
++    boolean createNewFile() throws IOException;
++
++    boolean delete();
++
++    String[] list() throws NotDirectoryException;
++
++    boolean mkdir();
++
++    boolean mkdirs();
++
++    boolean renameTo(JinixFileSP file);
++
++    boolean setLastModified(long time);
++
++    boolean setReadOnly();
++
++    boolean setWritable(boolean writable, boolean ownerOnly);
++
++    boolean setReadable(boolean readable, boolean ownerOnly);
++
++    boolean setExecutable(boolean executable, boolean ownerOnly);
++
++    boolean canExecute();
++
++    Path toPath();
++
++}
+diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixNativeAccessPermission.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixNativeAccessPermission.java
+new file mode 100644
+index 0000000000..f04ccd2469
+--- /dev/null
++++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixNativeAccessPermission.java
+@@ -0,0 +1,46 @@
++package org.rowland.jinixspi;
++
++import java.security.Permission;
++
++/**
++ * Jinix permissions required to access the native file system.
++ *
++ * NativeAccess
++ * Allow access to the underlying Linux filesystem. The default JinixPolicy grants this permission to code not
++ * loaded by the ProtectionDomain ExecClassLoader.
++ */
++public class JinixNativeAccessPermission extends Permission {
++
++    private static final long serialVersionUID = 1L;
++
++    public JinixNativeAccessPermission() {
++        super("NativeAccess");
++    }
++
++    @Override
++    public boolean implies(Permission permission) {
++        return permission.getClass() == getClass();
++    }
++
++    @Override
++    public boolean equals(Object obj) {
++        if (obj == this)
++            return true;
++
++        if ((obj == null) || (obj.getClass() != getClass()))
++            return false;
++
++        return true;
++    }
++
++    @Override
++    public int hashCode() {
++        return 1;
++    }
++
++    @Override
++    public String getActions() {
++        return "";
++    }
++}
++
+diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixRandomAccessFileSP.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixRandomAccessFileSP.java
+new file mode 100644
+index 0000000000..4fef8f6762
+--- /dev/null
++++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixRandomAccessFileSP.java
+@@ -0,0 +1,34 @@
++package org.rowland.jinixspi;
++
++import java.io.FileDescriptor;
++import java.io.IOException;
++import java.nio.channels.FileChannel;
++
++public interface JinixRandomAccessFileSP {
++
++    FileDescriptor getFD() throws IOException;
++
++    FileChannel getChannel();
++
++    int read() throws IOException;
++
++    int read(byte b[], int off, int len) throws IOException;
++
++    void readFully(byte b[], int off, int len) throws IOException;
++
++    int skipBytes(int n) throws IOException;
++
++    void write(int b) throws IOException;
++
++    void write(byte b[], int off, int len) throws IOException;
++
++    long getFilePointer() throws IOException;
++
++    void seek(long pos) throws IOException;
++
++    long length() throws IOException;
++
++    void setLength(long length) throws IOException;
++
++    void close() throws IOException;
++}
+diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixRuntimeSP.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixRuntimeSP.java
+new file mode 100644
+index 0000000000..f0f3fdb2d6
+--- /dev/null
++++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixRuntimeSP.java
+@@ -0,0 +1,18 @@
++package org.rowland.jinixspi;
++
++import java.io.IOException;
++
++public interface JinixRuntimeSP {
++
++    void registerJinixThread(Thread t);
++
++    void unregisterJinixThread(Thread t);
++
++    void exit(int status);
++
++    Process createJinixProcess(String[] cmdarray,
++                          java.util.Map<String,String> environment,
++                          String dir,
++                          ProcessBuilder.Redirect[] redirects,
++                          boolean redirectErrorStream) throws IOException;
++}
+diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProfiderFactory.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProfiderFactory.java
+new file mode 100644
+index 0000000000..d2c5ebb57b
+--- /dev/null
++++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProfiderFactory.java
+@@ -0,0 +1,26 @@
++package org.rowland.jinixspi;
++
++import java.net.URI;
++
++public class JinixServiceProfiderFactory {
++
++    public static JinixFileSP createJinixFile(String path) {return null;}
++
++    public static JinixFileSP createJinixFile(String parent, String child) {return null;}
++
++    public static JinixFileSP createJinixFile(JinixFileSP parent, String child) {return null;}
++
++    public static JinixFileSP createJinixFile(URI uri) {return null;};
++
++    public static JinixFileInputStreamSP createJinixFileInputStream(JinixFileSP file) {return null;}
++
++    public static JinixFileInputStreamSP createJinixFileInputStream(Object descriptor) {return null;}
++
++    public static JinixFileOutputStreamSP createJinixFileOutputStream(JinixFileSP file, boolean append) {return null;}
++
++    public static JinixFileOutputStreamSP createJinixFileOutputStream(Object descriptor) {return null;}
++
++    public static JinixRandomAccessFileSP createJinixRandomAccessFile(JinixFileSP file, String mode, boolean openAndDelete) {return null;}
++}
++
++
+diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProviderFactory.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProviderFactory.java
+new file mode 100644
+index 0000000000..bcfa72fc4e
+--- /dev/null
++++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProviderFactory.java
+@@ -0,0 +1,60 @@
++package org.rowland.jinixspi;
++
++import java.io.FileNotFoundException;
++import java.net.URI;
++
++public class JinixServiceProviderFactory {
++    private static JinixServiceProviderFactoryImplementor factoryImpl = null;
++
++    public static void setFactoryImpl(JinixServiceProviderFactoryImplementor factory) {
++        if (factoryImpl == null) {
++            JinixServiceProviderFactory.factoryImpl = factory;
++        }
++    }
++
++    public static JinixFileSP createJinixFile(String path) {
++        return factoryImpl.createJinixFile(path);
++    }
++
++    public static JinixFileSP createJinixFile(String parent, String child) {
++        return factoryImpl.createJinixFile(parent, child);
++    }
++
++    public static JinixFileSP createJinixFile(JinixFileSP parent, String child) {
++        return factoryImpl.createJinixFile(parent, child);
++    }
++
++    public static JinixFileSP createJinixFile(URI uri) {
++        return factoryImpl.createJinixFile(uri);
++    }
++
++    public static JinixFileInputStreamSP createJinixFileInputStream(JinixFileSP file) throws FileNotFoundException {
++        return factoryImpl.createJinixFileInputStream(file);
++    }
++
++    public static JinixFileInputStreamSP createJinixFileInputStream(Object descriptor) {
++        return factoryImpl.createJinixFileInputStream(descriptor);
++    }
++
++    public static JinixFileOutputStreamSP createJinixFileOutputStream(JinixFileSP file, boolean append) throws FileNotFoundException {
++        return factoryImpl.createJinixFileOutputStream(file, append);
++    }
++
++    public static JinixFileOutputStreamSP createJinixFileOutputStream(Object descriptor) {
++        return factoryImpl.createJinixFileOutputStream(descriptor);
++    }
++
++    public static JinixRandomAccessFileSP createJinixRandomAccessFile(JinixFileSP file, String mode, boolean openAndDelete) throws FileNotFoundException {
++        return factoryImpl.createJinixRandomAccessFile(file, mode, openAndDelete);
++    }
++
++    public static JinixSystemSP getJinixSystem() {
++        return factoryImpl.getJinixSystem();
++    }
++
++    public static JinixRuntimeSP getJinixRuntime() {
++        return factoryImpl.getJinixRuntime();
++    }
++}
++
++
+diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProviderFactoryImplementor.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProviderFactoryImplementor.java
+new file mode 100644
+index 0000000000..800434ee76
+--- /dev/null
++++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProviderFactoryImplementor.java
+@@ -0,0 +1,31 @@
++package org.rowland.jinixspi;
++
++import java.io.FileNotFoundException;
++import java.net.URI;
++
++public interface JinixServiceProviderFactoryImplementor {
++
++    JinixFileSP createJinixFile(String path);
++
++    JinixFileSP createJinixFile(String parent, String child);
++
++    JinixFileSP createJinixFile(JinixFileSP parent, String child);
++
++    JinixFileSP createJinixFile(URI uri);
++
++    JinixFileInputStreamSP createJinixFileInputStream(JinixFileSP file) throws FileNotFoundException;
++
++    JinixFileInputStreamSP createJinixFileInputStream(Object descriptor);
++
++    JinixFileOutputStreamSP createJinixFileOutputStream(JinixFileSP file, boolean append) throws FileNotFoundException;
++
++    JinixFileOutputStreamSP createJinixFileOutputStream(Object descriptor);
++
++    JinixRandomAccessFileSP createJinixRandomAccessFile(JinixFileSP file, String mode, boolean openAndDelete) throws FileNotFoundException;
++
++    void registerJinixThread(Thread t);
++
++    JinixSystemSP getJinixSystem();
++
++    JinixRuntimeSP getJinixRuntime();
++}
+diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixSystemSP.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixSystemSP.java
+new file mode 100644
+index 0000000000..056788fc00
+--- /dev/null
++++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixSystemSP.java
+@@ -0,0 +1,11 @@
++package org.rowland.jinixspi;
++
++import java.util.List;
++import java.util.Properties;
++
++public interface JinixSystemSP {
++
++    Properties getJinixProperties();
++
++    List<String> getJinixPropOverrides();
++}

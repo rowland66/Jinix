@@ -3,6 +3,7 @@ package org.rowland.jinix.io;
 import org.rowland.jinix.lang.JinixRuntime;
 import org.rowland.jinix.naming.*;
 import org.rowland.jinix.nio.JinixFileAttributes;
+import org.rowland.jinixspi.JinixFileSP;
 
 import java.io.IOException;
 import java.net.URI;
@@ -18,7 +19,7 @@ import java.util.ArrayList;
 /**
  * Created by rsmith on 12/2/2016.
  */
-public class JinixFile {
+public class JinixFile implements JinixFileSP {
 
     private String path;
 
@@ -428,7 +429,7 @@ public class JinixFile {
         }
     }
 
-    public boolean renameTo(JinixFile dest) {
+    public boolean renameTo(JinixFileSP dest) {
         try {
             Object srcLookup = JinixRuntime.getRuntime().lookup(getCanonicalPath());
             String destFilePath = dest.getCanonicalPath();
@@ -451,6 +452,31 @@ public class JinixFile {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public boolean setReadOnly() {
+        return true;
+    }
+
+    @Override
+    public boolean setWritable(boolean writeable, boolean ownerOnly) {
+        return true;
+    }
+
+    @Override
+    public boolean setReadable(boolean readable, boolean ownerOnly) {
+        return true;
+    }
+
+    @Override
+    public boolean setExecutable(boolean executeable, boolean ownerOnly) {
+        return true;
+    }
+
+    @Override
+    public boolean canExecute() {
+        return true;
     }
 
     private Integer[] getOffsets(String path, String root) {

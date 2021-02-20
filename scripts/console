@@ -1,0 +1,2 @@
+#!bash
+${JINIX_JAVA_HOME}/bin/java -classpath ./lib/ProgrammingInterface.jar:./lib/ServerInterfaces.jar:./lib/Console.jar org.rowland.jinix.Console

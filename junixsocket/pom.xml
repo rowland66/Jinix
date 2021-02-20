@@ -57,8 +57,6 @@ In contrast to other implementations, junixsocket extends the Java Sockets API (
   <modules>
     <module>junixsocket-common</module>
     <module>junixsocket-rmi</module>
-    <module>junixsocket-mysql</module>
-    <module>junixsocket-demo</module>
   </modules>
 
   <profiles>
@@ -77,33 +75,15 @@ In contrast to other implementations, junixsocket extends the Java Sockets API (
     </profile>
   </profiles>
 
-  <dependencies>
-    <dependency>
-      <groupId>junit</groupId>
-      <artifactId>junit</artifactId>
-      <version>4.11</version>
-      <scope>test</scope>
-    </dependency>
-  </dependencies>
-
   <reporting>
     <plugins>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-checkstyle-plugin</artifactId>
-        <reportSets>
-          <reportSet>
-            <reports>
-              <report>checkstyle</report>
-            </reports>
-          </reportSet>
-        </reportSets>
-      </plugin>
+      <!--
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-jxr-plugin</artifactId>
-        <version>2.5</version>
+        <version>3.0.0</version>
       </plugin>
+      -->
     </plugins>
   </reporting>
 </project>

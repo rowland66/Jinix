@@ -1,12 +1,13 @@
 package org.rowland.jinix.nio;
 
 import org.rowland.jinix.io.JinixFileDescriptor;
-import org.rowland.jinix.io.JinixNativeAccessPermission;
+import org.rowland.jinixspi.JinixNativeAccessPermission;
 import org.rowland.jinix.lang.JinixRuntime;
 import org.rowland.jinix.naming.*;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.*;
@@ -231,7 +232,7 @@ public class JinixFileSystemProvider extends FileSystemProvider {
                                     p = null;
                                     return false;
                                 }
-                                p = next;
+                                p = dir.resolve(next);
                                 return true;
                             } catch (IOException e1) {
                                 throw new RuntimeException(e1);
@@ -476,7 +477,10 @@ public class JinixFileSystemProvider extends FileSystemProvider {
             try {
                 securityManager.checkPermission(new JinixNativeAccessPermission());
             } catch (AccessControlException e) {
-                throw new UnsupportedOperationException("JinixFileSystemProvider.isSameFile()");
+                if (path.toAbsolutePath().equals(path2.toAbsolutePath())) {
+                    return true;
+                }
+                return false;
             }
         }
 
@@ -486,14 +490,14 @@ public class JinixFileSystemProvider extends FileSystemProvider {
     @Override
     public boolean isHidden(Path path) throws IOException {
         if (defaultFileSystemProvider == null) {
-            throw new UnsupportedOperationException("JinixFileSystemProvider.isHidden()");
+            return false;
         }
         SecurityManager securityManager = System.getSecurityManager();
         if (securityManager != null) {
             try {
                 securityManager.checkPermission(new JinixNativeAccessPermission());
             } catch (AccessControlException e) {
-                throw new UnsupportedOperationException("JinixFileSystemProvider.isHidden()");
+                return false;
             }
         }
 
@@ -582,7 +586,13 @@ public class JinixFileSystemProvider extends FileSystemProvider {
             }
         }
 
-        return defaultFileSystemProvider.readAttributes(path, type, options);
+        try {
+            Path defaultFileSystemPath = defaultFileSystemProvider.getPath(
+                    new URI(defaultFileSystemProvider.getScheme(), "", path.toString(), null));
+            return defaultFileSystemProvider.readAttributes(defaultFileSystemPath, type, options);
+        } catch (URISyntaxException e) {
+            throw new IOException("Invalid URI for underlying filesystem");
+        }
     }
 
     @Override

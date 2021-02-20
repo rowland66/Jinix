@@ -33,7 +33,8 @@ public interface ProcessManager extends Remote {
         CONTINUE, // Resume a process that has been suspended with STOP
         CHILD, // Sent to indicate that a child process has terminated
         TERMINAL_INPUT,
-        TERMINAL_OUTPUT
+        TERMINAL_OUTPUT,
+        WINCH // Sent to indicate that the size of the processes terminal has changed.
     };
 
     public enum ProcessState implements Serializable {

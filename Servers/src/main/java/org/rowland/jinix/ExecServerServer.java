@@ -156,19 +156,17 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
         cmdList.add("-Djinix.pid="+Integer.toString(pid));
 
         for (int i=0; i<args.length; i++) {
-            if (args[i].equals("-Xdebug") || args[i].startsWith("-Xrunjdwp")) {
+            if (args[i].startsWith("-agentlib:jdwp")) {
                 cmdList.add(args[i]);
                 args[i] = null;
             }
         }
 
-        cmdList.add("-Xbootclasspath/p:" +
-                "./lib/Runtime.jar" + File.pathSeparator +
-                "./lib/PlatformRuntime.jar" + File.pathSeparator +
+        cmdList.add("-Xbootclasspath/a:" +
                 "./lib/ProgrammingInterface.jar" + File.pathSeparator +
                 "./lib/ServerInterfaces.jar");
-        cmdList.add("-javaagent:./lib/RuntimeAgent.jar");
         cmdList.add("-Djava.nio.file.spi.DefaultFileSystemProvider=org.rowland.jinix.nio.JinixFileSystemProvider");
+        //cmdList.add("-Djava.rmi.server.ignoreStubClasses=true");
         //cmdList.add("-Dsun.rmi.dgc.logLevel=VERBOSE");
         //cmdList.add("-Dsun.misc.URLClassPath.debug=true");
         //cmdList.add("-Djava.security.debug=\"access,failure\"");
@@ -190,7 +188,8 @@ class ExecServerServer extends JinixKernelUnicastRemoteObject implements ExecSer
             }
         }
         cmdList.add("-classpath");
-        String classPathStr = "./lib/ExecLauncher.jar" + File.pathSeparator + "./lib/NativeFileSystem.jar";
+        String classPathStr = "./lib/ExecLauncher.jar" +
+                File.pathSeparator + "./lib/NativeFileSystem.jar";
         if (rmiMode == JinixKernel.RMI_MODE.AFUNIX) {
             classPathStr = classPathStr + File.pathSeparator + "./lib/AFUNIXRMI.jar";
         }

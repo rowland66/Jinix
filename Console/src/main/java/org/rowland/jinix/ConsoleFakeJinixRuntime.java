@@ -139,11 +139,6 @@ public class ConsoleFakeJinixRuntime extends JinixRuntime {
     }
 
     @Override
-    public void registerJinixThread(Thread t) {
-
-    }
-
-    @Override
     public void setProcessGroupId(int processGroupId) {
 
     }
@@ -171,6 +166,16 @@ public class ConsoleFakeJinixRuntime extends JinixRuntime {
     @Override
     public void setForegroundProcessGroupId(int processGroupId) {
 
+    }
+
+    @Override
+    public int getTerminalColumns() {
+        return 0;
+    }
+
+    @Override
+    public int getTerminalLines() {
+        return 0;
     }
 
     @Override

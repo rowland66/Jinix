@@ -1,0 +1,1842 @@
+diff --git a/src/java.base/share/classes/java/io/File.java b/src/java.base/share/classes/java/io/File.java
+index 6bf3fe708a..383d1b44cd 100644
+--- a/src/java.base/share/classes/java/io/File.java
++++ b/src/java.base/share/classes/java/io/File.java
+@@ -29,13 +29,19 @@ import java.net.URI;
+ import java.net.URL;
+ import java.net.MalformedURLException;
+ import java.net.URISyntaxException;
++import java.nio.file.NotDirectoryException;
+ import java.util.List;
+ import java.util.ArrayList;
+ import java.security.SecureRandom;
+ import java.nio.file.Path;
+ import java.nio.file.FileSystems;
++
++import org.rowland.jinixspi.JinixFileSP;
++import org.rowland.jinixspi.JinixServiceProviderFactory;
+ import sun.security.action.GetPropertyAction;
+ 
++import static org.rowland.jinixspi.JinixAccess.isJinix;
++
+ /**
+  * An abstract representation of file and directory pathnames.
+  *
+@@ -146,7 +152,7 @@ import sun.security.action.GetPropertyAction;
+  */
+ 
+ public class File
+-    implements Serializable, Comparable<File>
++        implements Serializable, Comparable<File>
+ {
+ 
+     /**
+@@ -184,7 +190,7 @@ public class File
+     final boolean isInvalid() {
+         if (status == null) {
+             status = (this.path.indexOf('\u0000') < 0) ? PathStatus.CHECKED
+-                                                       : PathStatus.INVALID;
++                    : PathStatus.INVALID;
+         }
+         return status == PathStatus.INVALID;
+     }
+@@ -239,6 +245,7 @@ public class File
+      */
+     public static final String pathSeparator = "" + pathSeparatorChar;
+ 
++    private JinixFileSP jinixFile;
+ 
+     /* -- Constructors -- */
+ 
+@@ -248,6 +255,10 @@ public class File
+     private File(String pathname, int prefixLength) {
+         this.path = pathname;
+         this.prefixLength = prefixLength;
++
++        if (isJinix()) {
++            this.jinixFile = JinixServiceProviderFactory.createJinixFile(pathname);
++        }
+     }
+ 
+     /**
+@@ -258,8 +269,13 @@ public class File
+     private File(String child, File parent) {
+         assert parent.path != null;
+         assert (!parent.path.equals(""));
++
+         this.path = fs.resolve(parent.path, child);
+         this.prefixLength = parent.prefixLength;
++
++        if (isJinix()) {
++            this.jinixFile = JinixServiceProviderFactory.createJinixFile(parent.getPath() + '/' + child);
++        }
+     }
+ 
+     /**
+@@ -275,8 +291,13 @@ public class File
+         if (pathname == null) {
+             throw new NullPointerException();
+         }
++
+         this.path = fs.normalize(pathname);
+         this.prefixLength = fs.prefixLength(this.path);
++
++        if (isJinix()) {
++            this.jinixFile = JinixServiceProviderFactory.createJinixFile(pathname);
++        }
+     }
+ 
+     /* Note: The two-argument File constructors do not interpret an empty
+@@ -318,15 +339,19 @@ public class File
+         if (parent != null) {
+             if (parent.equals("")) {
+                 this.path = fs.resolve(fs.getDefaultParent(),
+-                                       fs.normalize(child));
++                        fs.normalize(child));
+             } else {
+                 this.path = fs.resolve(fs.normalize(parent),
+-                                       fs.normalize(child));
++                        fs.normalize(child));
+             }
+         } else {
+             this.path = fs.normalize(child);
+         }
+         this.prefixLength = fs.prefixLength(this.path);
++
++        if (isJinix()) {
++            jinixFile = JinixServiceProviderFactory.createJinixFile(parent, child);
++        }
+     }
+ 
+     /**
+@@ -361,15 +386,23 @@ public class File
+         if (parent != null) {
+             if (parent.path.equals("")) {
+                 this.path = fs.resolve(fs.getDefaultParent(),
+-                                       fs.normalize(child));
++                        fs.normalize(child));
+             } else {
+                 this.path = fs.resolve(parent.path,
+-                                       fs.normalize(child));
++                        fs.normalize(child));
+             }
+         } else {
+             this.path = fs.normalize(child);
+         }
+         this.prefixLength = fs.prefixLength(this.path);
++
++        if (isJinix()) {
++            if (parent != null) {
++                jinixFile = JinixServiceProviderFactory.createJinixFile(JinixServiceProviderFactory.createJinixFile(parent.getPath()), child);
++            } else {
++                jinixFile = JinixServiceProviderFactory.createJinixFile((JinixFileSP) null, child);
++            }
++        }
+     }
+ 
+     /**
+@@ -435,6 +468,10 @@ public class File
+             p = p.replace('/', File.separatorChar);
+         this.path = fs.normalize(p);
+         this.prefixLength = fs.prefixLength(this.path);
++
++        if (isJinix()) {
++            jinixFile = JinixServiceProviderFactory.createJinixFile(uri);
++        }
+     }
+ 
+ 
+@@ -451,6 +488,11 @@ public class File
+      *          is empty
+      */
+     public String getName() {
++
++        if (isJinix()) {
++            return jinixFile.getName();
++        }
++
+         int index = path.lastIndexOf(separatorChar);
+         if (index < prefixLength) return path.substring(prefixLength);
+         return path.substring(index + 1);
+@@ -470,6 +512,11 @@ public class File
+      *          does not name a parent
+      */
+     public String getParent() {
++
++        if (isJinix()) {
++            return jinixFile.getParent();
++        }
++
+         int index = path.lastIndexOf(separatorChar);
+         if (index < prefixLength) {
+             if ((prefixLength > 0) && (path.length() > prefixLength))
+@@ -496,6 +543,13 @@ public class File
+      * @since 1.2
+      */
+     public File getParentFile() {
++
++        if (isJinix()) {
++            JinixFileSP jf = jinixFile.getParentFile();
++            if (jf == null) return null;
++            return new File(jf.getPath());
++        }
++
+         String p = this.getParent();
+         if (p == null) return null;
+         return new File(p, this.prefixLength);
+@@ -509,6 +563,10 @@ public class File
+      * @return  The string form of this abstract pathname
+      */
+     public String getPath() {
++
++        if (isJinix()) {
++            return jinixFile.getPath();
++        }
+         return path;
+     }
+ 
+@@ -526,6 +584,9 @@ public class File
+      *          <code>false</code> otherwise
+      */
+     public boolean isAbsolute() {
++        if (isJinix()) {
++            return jinixFile.isAbsolute();
++        }
+         return fs.isAbsolute(this);
+     }
+ 
+@@ -553,6 +614,9 @@ public class File
+      * @see     java.io.File#isAbsolute()
+      */
+     public String getAbsolutePath() {
++        if (isJinix()) {
++            return jinixFile.getAbsolutePath();
++        }
+         return fs.resolve(this);
+     }
+ 
+@@ -569,6 +633,10 @@ public class File
+      * @since 1.2
+      */
+     public File getAbsoluteFile() {
++        if (isJinix()) {
++            JinixFileSP jf = jinixFile.getAbsoluteFile();
++            return new File(jf.getAbsolutePath(), 0);
++        }
+         String absPath = getAbsolutePath();
+         return new File(absPath, fs.prefixLength(absPath));
+     }
+@@ -615,6 +683,11 @@ public class File
+         if (isInvalid()) {
+             throw new IOException("Invalid file path");
+         }
++
++        if (isJinix()) {
++            return jinixFile.getCanonicalPath();
++        }
++
+         return fs.canonicalize(fs.resolve(this));
+     }
+ 
+@@ -640,6 +713,12 @@ public class File
+      * @see     Path#toRealPath
+      */
+     public File getCanonicalFile() throws IOException {
++
++        if (isJinix()) {
++            JinixFileSP jf = jinixFile.getCanonicalFile();
++            return new File(jf.getCanonicalPath(), 0);
++        }
++
+         String canonPath = getCanonicalPath();
+         return new File(canonPath, fs.prefixLength(canonPath));
+     }
+@@ -759,6 +838,10 @@ public class File
+      *          method denies read access to the file
+      */
+     public boolean canRead() {
++        if (isJinix()) {
++            return true;
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkRead(path);
+@@ -787,6 +870,10 @@ public class File
+      *          method denies write access to the file
+      */
+     public boolean canWrite() {
++        if (isJinix()) {
++            return true;
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkWrite(path);
+@@ -810,6 +897,10 @@ public class File
+      *          method denies read access to the file or directory
+      */
+     public boolean exists() {
++        if (isJinix()) {
++            return jinixFile.exists();
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkRead(path);
+@@ -840,6 +931,11 @@ public class File
+      *          method denies read access to the file
+      */
+     public boolean isDirectory() {
++
++        if (isJinix()) {
++            return jinixFile.isDirectory();
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkRead(path);
+@@ -873,6 +969,10 @@ public class File
+      *          method denies read access to the file
+      */
+     public boolean isFile() {
++        if (isJinix()) {
++            return jinixFile.isFile();
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkRead(path);
+@@ -902,6 +1002,10 @@ public class File
+      * @since 1.2
+      */
+     public boolean isHidden() {
++        if (isJinix()) {
++            return false;
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkRead(path);
+@@ -945,6 +1049,10 @@ public class File
+      *          method denies read access to the file
+      */
+     public long lastModified() {
++        if (isJinix()) {
++            jinixFile.lastModified();
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkRead(path);
+@@ -976,6 +1084,10 @@ public class File
+      *          method denies read access to the file
+      */
+     public long length() {
++        if (isJinix()) {
++            return jinixFile.length();
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkRead(path);
+@@ -1016,6 +1128,10 @@ public class File
+      * @since 1.2
+      */
+     public boolean createNewFile() throws IOException {
++        if (isJinix()) {
++            return jinixFile.createNewFile();
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) security.checkWrite(path);
+         if (isInvalid()) {
+@@ -1043,6 +1159,10 @@ public class File
+      *          delete access to the file
+      */
+     public boolean delete() {
++        if (isJinix()) {
++            return jinixFile.delete();
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkDelete(path);
+@@ -1088,7 +1208,7 @@ public class File
+         if (isInvalid()) {
+             return;
+         }
+-        DeleteOnExitHook.add(path);
++        //DeleteOnExitHook.add(path); Not implemented
+     }
+ 
+     /**
+@@ -1124,6 +1244,13 @@ public class File
+      *          the directory
+      */
+     public String[] list() {
++        if (isJinix()) {
++            try {
++                return jinixFile.list();
++            } catch (NotDirectoryException e) {
++                return null;
++            }
++        }
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkRead(path);
+@@ -1318,6 +1445,10 @@ public class File
+      *          method does not permit the named directory to be created
+      */
+     public boolean mkdir() {
++        if (isJinix()) {
++            return jinixFile.mkdir();
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkWrite(path);
+@@ -1349,6 +1480,9 @@ public class File
+      *          parent directories to be created
+      */
+     public boolean mkdirs() {
++        if (isJinix()) {
++            return jinixFile.mkdirs();
++        }
+         if (exists()) {
+             return false;
+         }
+@@ -1395,6 +1529,10 @@ public class File
+      *          If parameter <code>dest</code> is <code>null</code>
+      */
+     public boolean renameTo(File dest) {
++        if (isJinix()) {
++            return jinixFile.renameTo(JinixServiceProviderFactory.createJinixFile(dest.getPath()));
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkWrite(path);
+@@ -1436,6 +1574,10 @@ public class File
+      * @since 1.2
+      */
+     public boolean setLastModified(long time) {
++        if (isJinix()) {
++            return jinixFile.setLastModified(time);
++        }
++
+         if (time < 0) throw new IllegalArgumentException("Negative time");
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+@@ -1467,6 +1609,10 @@ public class File
+      * @since 1.2
+      */
+     public boolean setReadOnly() {
++        if (isJinix()) {
++            return jinixFile.setReadOnly();
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkWrite(path);
+@@ -1510,6 +1656,10 @@ public class File
+      * @since 1.6
+      */
+     public boolean setWritable(boolean writable, boolean ownerOnly) {
++        if (isJinix()) {
++            return jinixFile.setWritable(writable, ownerOnly);
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkWrite(path);
+@@ -1588,6 +1738,10 @@ public class File
+      * @since 1.6
+      */
+     public boolean setReadable(boolean readable, boolean ownerOnly) {
++        if (isJinix()) {
++            return jinixFile.setReadable(readable, ownerOnly);
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkWrite(path);
+@@ -1669,6 +1823,10 @@ public class File
+      * @since 1.6
+      */
+     public boolean setExecutable(boolean executable, boolean ownerOnly) {
++        if (isJinix()) {
++            return jinixFile.setExecutable(executable, ownerOnly);
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkWrite(path);
+@@ -1732,6 +1890,10 @@ public class File
+      * @since 1.6
+      */
+     public boolean canExecute() {
++        if (isJinix()) {
++            return jinixFile.canExecute();
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkExec(path);
+@@ -1788,7 +1950,12 @@ public class File
+      * @see java.nio.file.FileStore
+      */
+     public static File[] listRoots() {
+-        return fs.listRoots();
++        SecurityManager securityManager = System.getSecurityManager();
++        if (securityManager == null) {
++            return fs.listRoots();
++        } else {
++            return new File[]{new File("/")};
++        }
+     }
+ 
+ 
+@@ -1810,6 +1977,10 @@ public class File
+      * @since  1.6
+      */
+     public long getTotalSpace() {
++        if (isJinix()) {
++            return Long.MAX_VALUE;
++        }
++
+         SecurityManager sm = System.getSecurityManager();
+         if (sm != null) {
+             sm.checkPermission(new RuntimePermission("getFileSystemAttributes"));
+@@ -1818,6 +1989,7 @@ public class File
+         if (isInvalid()) {
+             return 0L;
+         }
++
+         return fs.getSpace(this, FileSystem.SPACE_TOTAL);
+     }
+ 
+@@ -1848,6 +2020,10 @@ public class File
+      * @since  1.6
+      */
+     public long getFreeSpace() {
++        if (isJinix()) {
++            return Long.MAX_VALUE;
++        }
++
+         SecurityManager sm = System.getSecurityManager();
+         if (sm != null) {
+             sm.checkPermission(new RuntimePermission("getFileSystemAttributes"));
+@@ -1856,6 +2032,7 @@ public class File
+         if (isInvalid()) {
+             return 0L;
+         }
++
+         return fs.getSpace(this, FileSystem.SPACE_FREE);
+     }
+ 
+@@ -1889,6 +2066,10 @@ public class File
+      * @since  1.6
+      */
+     public long getUsableSpace() {
++        if (isJinix()) {
++            return Long.MAX_VALUE;
++        }
++
+         SecurityManager sm = System.getSecurityManager();
+         if (sm != null) {
+             sm.checkPermission(new RuntimePermission("getFileSystemAttributes"));
+@@ -1908,14 +2089,25 @@ public class File
+         // temporary directory location
+         private static final File tmpdir = new File(
+                 GetPropertyAction.privilegedGetProperty("java.io.tmpdir"));
+-        static File location() {
+-            return tmpdir;
++        private static File jinixTmpdir = null;
++
++        static File location(boolean nativeAccess) {
++            if (nativeAccess) {
++                return tmpdir;
++            } else {
++                synchronized (File.class) {
++                    if (jinixTmpdir == null) {
++                        jinixTmpdir = new File(System.getProperty("java.io.tmpdir"));
++                    }
++                    return jinixTmpdir;
++                }
++            }
+         }
+ 
+         // file name generation
+         private static final SecureRandom random = new SecureRandom();
+         private static int shortenSubName(int subNameLength, int excess,
+-            int nameMin) {
++                                          int nameMin) {
+             int newLength = Math.max(nameMin, subNameLength - excess);
+             if (newLength < subNameLength) {
+                 return newLength;
+@@ -1923,7 +2115,7 @@ public class File
+             return subNameLength;
+         }
+         static File generateFile(String prefix, String suffix, File dir)
+-            throws IOException
++                throws IOException
+         {
+             long n = random.nextLong();
+             String nus = Long.toUnsignedString(n);
+@@ -1951,7 +2143,7 @@ public class File
+                     // Attempt to shorten the suffix length to no less than
+                     // 0 or 4 depending on whether it begins with a dot ('.')
+                     suffixLength = shortenSubName(suffixLength, excess,
+-                        suffix.indexOf(".") == 0 ? 4 : 0);
++                            suffix.indexOf(".") == 0 ? 4 : 0);
+                     suffixLength = shortenSubName(suffixLength, excess, 3);
+                     excess = prefixLength + nusLength + suffixLength - nameMax;
+                 }
+@@ -1963,13 +2155,13 @@ public class File
+                 }
+ 
+                 StringBuilder sb =
+-                    new StringBuilder(prefixLength + nusLength + suffixLength);
++                        new StringBuilder(prefixLength + nusLength + suffixLength);
+                 sb.append(prefixLength < prefix.length() ?
+-                    prefix.substring(0, prefixLength) : prefix);
++                        prefix.substring(0, prefixLength) : prefix);
+                 sb.append(nusLength < nus.length() ?
+-                    nus.substring(0, nusLength) : nus);
++                        nus.substring(0, nusLength) : nus);
+                 sb.append(suffixLength < suffix.length() ?
+-                    suffix.substring(0, suffixLength) : suffix);
++                        suffix.substring(0, suffixLength) : suffix);
+                 name = sb.toString();
+             }
+ 
+@@ -1982,7 +2174,7 @@ public class File
+                     throw new IOException("Unable to create temporary file");
+                 else
+                     throw new IOException("Unable to create temporary file, "
+-                        + name);
++                            + name);
+             }
+             return f;
+         }
+@@ -2059,17 +2251,17 @@ public class File
+      */
+     public static File createTempFile(String prefix, String suffix,
+                                       File directory)
+-        throws IOException
++            throws IOException
+     {
+         if (prefix.length() < 3) {
+             throw new IllegalArgumentException("Prefix string \"" + prefix +
+-                "\" too short: length must be at least 3");
++                    "\" too short: length must be at least 3");
+         }
+         if (suffix == null)
+             suffix = ".tmp";
+ 
+         File tmpdir = (directory != null) ? directory
+-                                          : TempDirectory.location();
++                : TempDirectory.location(!isJinix());
+         SecurityManager sm = System.getSecurityManager();
+         File f;
+         do {
+@@ -2131,7 +2323,7 @@ public class File
+      * @see java.nio.file.Files#createTempDirectory(String,FileAttribute[])
+      */
+     public static File createTempFile(String prefix, String suffix)
+-        throws IOException
++            throws IOException
+     {
+         return createTempFile(prefix, suffix, null);
+     }
+@@ -2216,7 +2408,7 @@ public class File
+      * @serialData  Default fields followed by separator character.
+      */
+     private synchronized void writeObject(java.io.ObjectOutputStream s)
+-        throws IOException
++            throws IOException
+     {
+         s.defaultWriteObject();
+         s.writeChar(separatorChar); // Add the separator character
+@@ -2229,7 +2421,7 @@ public class File
+      * is replaced by the local separator.
+      */
+     private synchronized void readObject(java.io.ObjectInputStream s)
+-         throws IOException, ClassNotFoundException
++            throws IOException, ClassNotFoundException
+     {
+         ObjectInputStream.GetField fields = s.readFields();
+         String pathField = (String)fields.get("path", null);
+@@ -2282,6 +2474,10 @@ public class File
+      * @see Path#toFile
+      */
+     public Path toPath() {
++        if (isJinix()) {
++            return jinixFile.toPath();
++        }
++
+         Path result = filePath;
+         if (result == null) {
+             synchronized (this) {
+@@ -2294,4 +2490,4 @@ public class File
+         }
+         return result;
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/src/java.base/share/classes/java/io/FileDescriptor.java b/src/java.base/share/classes/java/io/FileDescriptor.java
+index ff0ff232d3..22c58397b7 100644
+--- a/src/java.base/share/classes/java/io/FileDescriptor.java
++++ b/src/java.base/share/classes/java/io/FileDescriptor.java
+@@ -45,7 +45,7 @@ import jdk.internal.ref.PhantomCleanable;
+  * @author  Pavani Diwanji
+  * @since   1.0
+  */
+-public final class FileDescriptor {
++public class FileDescriptor {
+ 
+     private int fd;
+ 
+diff --git a/src/java.base/share/classes/java/io/FileInputStream.java b/src/java.base/share/classes/java/io/FileInputStream.java
+index a2ab728ab9..7260bcec1b 100644
+--- a/src/java.base/share/classes/java/io/FileInputStream.java
++++ b/src/java.base/share/classes/java/io/FileInputStream.java
+@@ -26,8 +26,13 @@
+ package java.io;
+ 
+ import java.nio.channels.FileChannel;
++
++import org.rowland.jinixspi.JinixFileInputStreamSP;
++import org.rowland.jinixspi.JinixServiceProviderFactory;
+ import sun.nio.ch.FileChannelImpl;
+ 
++import static org.rowland.jinixspi.JinixAccess.isJinix;
++
+ 
+ /**
+  * A <code>FileInputStream</code> obtains input bytes
+@@ -81,6 +86,8 @@ class FileInputStream extends InputStream
+ 
+     private final Object altFinalizer;
+ 
++    private JinixFileInputStreamSP jinixFileInputStream = null;
++
+     /**
+      * Creates a <code>FileInputStream</code> by
+      * opening a connection to an actual file,
+@@ -140,8 +147,20 @@ class FileInputStream extends InputStream
+      * @see        java.lang.SecurityManager#checkRead(java.lang.String)
+      */
+     public FileInputStream(File file) throws FileNotFoundException {
++
++        if (isJinix()) {
++            this.fd = null;
++            this.path = null;
++
++            jinixFileInputStream = JinixServiceProviderFactory.createJinixFileInputStream(
++                    JinixServiceProviderFactory.createJinixFile(file.getPath()));
++            altFinalizer = null;
++            return;
++        }
++
+         String name = (file != null ? file.getPath() : null);
+         SecurityManager security = System.getSecurityManager();
++
+         if (security != null) {
+             security.checkRead(name);
+         }
+@@ -186,6 +205,15 @@ class FileInputStream extends InputStream
+      * @see        SecurityManager#checkRead(java.io.FileDescriptor)
+      */
+     public FileInputStream(FileDescriptor fdObj) {
++
++        if (isJinix()) {
++            fd = null;
++            path = null;
++            this.jinixFileInputStream = JinixServiceProviderFactory.createJinixFileInputStream(fdObj);
++            altFinalizer= null;
++            return;
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (fdObj == null) {
+             throw new NullPointerException();
+@@ -276,6 +304,11 @@ class FileInputStream extends InputStream
+      * @exception  IOException  if an I/O error occurs.
+      */
+     public int read(byte b[], int off, int len) throws IOException {
++
++        if (jinixFileInputStream != null) {
++            return jinixFileInputStream.read(b, off, len);
++        }
++
+         return readBytes(b, off, len);
+     }
+ 
+@@ -304,6 +337,11 @@ class FileInputStream extends InputStream
+      *             support seek, or if an I/O error occurs.
+      */
+     public long skip(long n) throws IOException {
++
++        if (jinixFileInputStream != null) {
++            return jinixFileInputStream.skip(n);
++        }
++
+         return skip0(n);
+     }
+ 
+@@ -327,6 +365,10 @@ class FileInputStream extends InputStream
+      *             {@code close} or an I/O error occurs.
+      */
+     public int available() throws IOException {
++
++        if (jinixFileInputStream != null) {
++            return jinixFileInputStream.available();
++        }
+         return available0();
+     }
+ 
+@@ -353,6 +395,7 @@ class FileInputStream extends InputStream
+      * @spec JSR-51
+      */
+     public void close() throws IOException {
++
+         if (closed) {
+             return;
+         }
+@@ -370,11 +413,13 @@ class FileInputStream extends InputStream
+             fc.close();
+         }
+ 
+-        fd.closeAll(new Closeable() {
+-            public void close() throws IOException {
+-               fd.close();
+-           }
+-        });
++        if (jinixFileInputStream == null) {
++            fd.closeAll(new Closeable() {
++                public void close() throws IOException {
++                    fd.close();
++                }
++            });
++        }
+     }
+ 
+     /**
+@@ -388,6 +433,12 @@ class FileInputStream extends InputStream
+      * @see        java.io.FileDescriptor
+      */
+     public final FileDescriptor getFD() throws IOException {
++
++        //TODO: Add support for FileDescriptors using Jinix
++        if (jinixFileInputStream != null) {
++            return jinixFileInputStream.getFD();
++        }
++
+         if (fd != null) {
+             return fd;
+         }
+@@ -411,6 +462,11 @@ class FileInputStream extends InputStream
+      * @spec JSR-51
+      */
+     public FileChannel getChannel() {
++
++        if (jinixFileInputStream != null) {
++            return jinixFileInputStream.getChannel();
++        }
++
+         FileChannel fc = this.channel;
+         if (fc == null) {
+             synchronized (this) {
+diff --git a/src/java.base/share/classes/java/io/FileOutputStream.java b/src/java.base/share/classes/java/io/FileOutputStream.java
+index 569f5269b1..c0e8bb72fe 100644
+--- a/src/java.base/share/classes/java/io/FileOutputStream.java
++++ b/src/java.base/share/classes/java/io/FileOutputStream.java
+@@ -28,8 +28,12 @@ package java.io;
+ import java.nio.channels.FileChannel;
+ import jdk.internal.misc.SharedSecrets;
+ import jdk.internal.misc.JavaIOFileDescriptorAccess;
++import org.rowland.jinixspi.JinixFileOutputStreamSP;
++import org.rowland.jinixspi.JinixServiceProviderFactory;
+ import sun.nio.ch.FileChannelImpl;
+ 
++import static org.rowland.jinixspi.JinixAccess.isJinix;
++
+ 
+ /**
+  * A file output stream is an output stream for writing data to a
+@@ -73,7 +77,7 @@ class FileOutputStream extends OutputStream
+      * Access to FileDescriptor internals.
+      */
+     private static final JavaIOFileDescriptorAccess fdAccess =
+-        SharedSecrets.getJavaIOFileDescriptorAccess();
++            SharedSecrets.getJavaIOFileDescriptorAccess();
+ 
+     /**
+      * The system dependent file descriptor.
+@@ -97,6 +101,8 @@ class FileOutputStream extends OutputStream
+ 
+     private final Object altFinalizer;
+ 
++    JinixFileOutputStreamSP jinixFileOutputStream;
++
+     /**
+      * Creates a file output stream to write to the file with the
+      * specified name. A new <code>FileDescriptor</code> object is
+@@ -153,7 +159,7 @@ class FileOutputStream extends OutputStream
+      * @since     1.1
+      */
+     public FileOutputStream(String name, boolean append)
+-        throws FileNotFoundException
++            throws FileNotFoundException
+     {
+         this(name != null ? new File(name) : null, append);
+     }
+@@ -217,8 +223,17 @@ class FileOutputStream extends OutputStream
+      * @since 1.4
+      */
+     public FileOutputStream(File file, boolean append)
+-        throws FileNotFoundException
++            throws FileNotFoundException
+     {
++        if (isJinix()) {
++            this.fd = null;
++            this.path = null;
++            altFinalizer = null;
++            jinixFileOutputStream = JinixServiceProviderFactory.createJinixFileOutputStream(
++                    JinixServiceProviderFactory.createJinixFile(file.getPath()), append);
++            return;
++        }
++
+         String name = (file != null ? file.getPath() : null);
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+@@ -265,6 +280,15 @@ class FileOutputStream extends OutputStream
+      * @see        java.lang.SecurityManager#checkWrite(java.io.FileDescriptor)
+      */
+     public FileOutputStream(FileDescriptor fdObj) {
++
++        if (isJinix()) {
++            this.fd = null;
++            this.path = null;
++            this.altFinalizer = null;
++            jinixFileOutputStream = JinixServiceProviderFactory.createJinixFileOutputStream(fdObj);
++            return;
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (fdObj == null) {
+             throw new NullPointerException();
+@@ -285,7 +309,7 @@ class FileOutputStream extends OutputStream
+      * @param append whether the file is to be opened in append mode
+      */
+     private native void open0(String name, boolean append)
+-        throws FileNotFoundException;
++            throws FileNotFoundException;
+ 
+     // wrap native call to allow instrumentation
+     /**
+@@ -294,7 +318,7 @@ class FileOutputStream extends OutputStream
+      * @param append whether the file is to be opened in append mode
+      */
+     private void open(String name, boolean append)
+-        throws FileNotFoundException {
++            throws FileNotFoundException {
+         open0(name, append);
+     }
+ 
+@@ -315,6 +339,10 @@ class FileOutputStream extends OutputStream
+      * @exception  IOException  if an I/O error occurs.
+      */
+     public void write(int b) throws IOException {
++        if (jinixFileOutputStream != null) {
++            jinixFileOutputStream.write(b);
++            return;
++        }
+         write(b, fdAccess.getAppend(fd));
+     }
+ 
+@@ -328,7 +356,7 @@ class FileOutputStream extends OutputStream
+      * @exception IOException If an I/O error has occurred.
+      */
+     private native void writeBytes(byte b[], int off, int len, boolean append)
+-        throws IOException;
++            throws IOException;
+ 
+     /**
+      * Writes <code>b.length</code> bytes from the specified byte array
+@@ -338,6 +366,10 @@ class FileOutputStream extends OutputStream
+      * @exception  IOException  if an I/O error occurs.
+      */
+     public void write(byte b[]) throws IOException {
++        if (jinixFileOutputStream != null) {
++            jinixFileOutputStream.write(b);
++            return;
++        }
+         writeBytes(b, 0, b.length, fdAccess.getAppend(fd));
+     }
+ 
+@@ -351,6 +383,10 @@ class FileOutputStream extends OutputStream
+      * @exception  IOException  if an I/O error occurs.
+      */
+     public void write(byte b[], int off, int len) throws IOException {
++        if (jinixFileOutputStream != null) {
++            jinixFileOutputStream.write(b, off, len);
++            return;
++        }
+         writeBytes(b, off, len, fdAccess.getAppend(fd));
+     }
+ 
+@@ -393,11 +429,13 @@ class FileOutputStream extends OutputStream
+             fc.close();
+         }
+ 
+-        fd.closeAll(new Closeable() {
+-            public void close() throws IOException {
+-               fd.close();
+-           }
+-        });
++        if (jinixFileOutputStream == null) {
++            fd.closeAll(new Closeable() {
++                public void close() throws IOException {
++                    fd.close();
++                }
++            });
++        }
+     }
+ 
+     /**
+@@ -410,12 +448,15 @@ class FileOutputStream extends OutputStream
+      * @exception  IOException  if an I/O error occurs.
+      * @see        java.io.FileDescriptor
+      */
+-     public final FileDescriptor getFD()  throws IOException {
++    public final FileDescriptor getFD()  throws IOException {
++        if (jinixFileOutputStream != null) {
++            return jinixFileOutputStream.getFD();
++        }
+         if (fd != null) {
+             return fd;
+         }
+         throw new IOException();
+-     }
++    }
+ 
+     /**
+      * Returns the unique {@link java.nio.channels.FileChannel FileChannel}
+@@ -435,13 +476,17 @@ class FileOutputStream extends OutputStream
+      * @spec JSR-51
+      */
+     public FileChannel getChannel() {
++        if (jinixFileOutputStream != null) {
++            return jinixFileOutputStream.getChannel();
++        }
++
+         FileChannel fc = this.channel;
+         if (fc == null) {
+             synchronized (this) {
+                 fc = this.channel;
+                 if (fc == null) {
+                     this.channel = fc = FileChannelImpl.open(fd, path, false,
+-                        true, false, this);
++                            true, false, this);
+                     if (closed) {
+                         try {
+                             // possible race with close(), benign since
+@@ -551,4 +596,4 @@ class FileOutputStream extends OutputStream
+         }
+     }
+ 
+-}
++}
+\ No newline at end of file
+diff --git a/src/java.base/share/classes/java/io/RandomAccessFile.java b/src/java.base/share/classes/java/io/RandomAccessFile.java
+index 55abd462ce..716468bb5c 100644
+--- a/src/java.base/share/classes/java/io/RandomAccessFile.java
++++ b/src/java.base/share/classes/java/io/RandomAccessFile.java
+@@ -29,8 +29,12 @@ import java.nio.channels.FileChannel;
+ import java.util.concurrent.atomic.AtomicBoolean;
+ import jdk.internal.misc.JavaIORandomAccessFileAccess;
+ import jdk.internal.misc.SharedSecrets;
++import org.rowland.jinixspi.JinixRandomAccessFileSP;
++import org.rowland.jinixspi.JinixServiceProviderFactory;
+ import sun.nio.ch.FileChannelImpl;
+ 
++import static org.rowland.jinixspi.JinixAccess.isJinix;
++
+ 
+ /**
+  * Instances of this class support both reading and writing to a
+@@ -79,6 +83,8 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+     private static final int O_DSYNC =  8;
+     private static final int O_TEMPORARY =  16;
+ 
++    private JinixRandomAccessFileSP jinixRandomAccessFile;
++
+     /**
+      * Creates a random access file stream to read from, and optionally
+      * to write to, a file with the specified name. A new
+@@ -122,7 +128,7 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      * @spec JSR-51
+      */
+     public RandomAccessFile(String name, String mode)
+-        throws FileNotFoundException
++            throws FileNotFoundException
+     {
+         this(name != null ? new File(name) : null, mode);
+     }
+@@ -209,14 +215,21 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      * @spec JSR-51
+      */
+     public RandomAccessFile(File file, String mode)
+-        throws FileNotFoundException
++            throws FileNotFoundException
+     {
+         this(file, mode, false);
+     }
+ 
+     private RandomAccessFile(File file, String mode, boolean openAndDelete)
+-        throws FileNotFoundException
++            throws FileNotFoundException
+     {
++        if (isJinix()) {
++            path = null;
++            jinixRandomAccessFile = JinixServiceProviderFactory.createJinixRandomAccessFile(
++                    (file != null ? JinixServiceProviderFactory.createJinixFile(file.getPath()) : null), mode, openAndDelete);
++            return;
++        }
++
+         String name = (file != null ? file.getPath() : null);
+         int imode = -1;
+         if (mode.equals("r"))
+@@ -237,9 +250,9 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+             imode |= O_TEMPORARY;
+         if (imode < 0)
+             throw new IllegalArgumentException("Illegal mode \"" + mode
+-                                               + "\" must be one of "
+-                                               + "\"r\", \"rw\", \"rws\","
+-                                               + " or \"rwd\"");
++                    + "\" must be one of "
++                    + "\"r\", \"rw\", \"rws\","
++                    + " or \"rwd\"");
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkRead(name);
+@@ -269,6 +282,10 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      * @see        java.io.FileDescriptor
+      */
+     public final FileDescriptor getFD() throws IOException {
++        if (jinixRandomAccessFile != null) {
++            return jinixRandomAccessFile.getFD();
++        }
++
+         if (fd != null) {
+             return fd;
+         }
+@@ -294,13 +311,18 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      * @spec JSR-51
+      */
+     public final FileChannel getChannel() {
++
++        if (jinixRandomAccessFile != null) {
++            return jinixRandomAccessFile.getChannel();
++        }
++
+         FileChannel fc = this.channel;
+         if (fc == null) {
+             synchronized (this) {
+                 fc = this.channel;
+                 if (fc == null) {
+                     this.channel = fc = FileChannelImpl.open(fd, path, true,
+-                        rw, false, this);
++                            rw, false, this);
+                     if (closed.get()) {
+                         try {
+                             fc.close();
+@@ -326,7 +348,7 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      *             defined above
+      */
+     private native void open0(String name, int mode)
+-        throws FileNotFoundException;
++            throws FileNotFoundException;
+ 
+     // wrap native call to allow instrumentation
+     /**
+@@ -341,7 +363,7 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      *             defined above
+      */
+     private void open(String name, int mode)
+-        throws FileNotFoundException {
++            throws FileNotFoundException {
+         open0(name, mode);
+     }
+ 
+@@ -363,6 +385,9 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      *                          end-of-file has been reached.
+      */
+     public int read() throws IOException {
++        if (jinixRandomAccessFile != null) {
++            return jinixRandomAccessFile.read();
++        }
+         return read0();
+     }
+ 
+@@ -403,6 +428,9 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      * {@code b.length - off}
+      */
+     public int read(byte b[], int off, int len) throws IOException {
++        if (jinixRandomAccessFile != null) {
++            return jinixRandomAccessFile.read(b, off, len);
++        }
+         return readBytes(b, off, len);
+     }
+ 
+@@ -465,6 +493,11 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      * @throws  IOException   if an I/O error occurs.
+      */
+     public final void readFully(byte b[], int off, int len) throws IOException {
++        if (jinixRandomAccessFile != null) {
++            jinixRandomAccessFile.readFully(b, off, len);
++            return;
++        }
++
+         int n = 0;
+         do {
+             int count = this.read(b, off + n, len - n);
+@@ -491,6 +524,11 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      * @exception  IOException  if an I/O error occurs.
+      */
+     public int skipBytes(int n) throws IOException {
++
++        if (jinixRandomAccessFile != null) {
++            return jinixRandomAccessFile.skipBytes(n);
++        }
++
+         long pos;
+         long len;
+         long newpos;
+@@ -520,6 +558,11 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      * @exception  IOException  if an I/O error occurs.
+      */
+     public void write(int b) throws IOException {
++        if (jinixRandomAccessFile != null) {
++            jinixRandomAccessFile.write(b);
++            return;
++        }
++
+         write0(b);
+     }
+ 
+@@ -556,11 +599,17 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      * @exception  IOException  if an I/O error occurs.
+      */
+     public void write(byte b[], int off, int len) throws IOException {
++        if (jinixRandomAccessFile != null) {
++            jinixRandomAccessFile.write(b, off, len);
++            return;
++        }
+         writeBytes(b, off, len);
+     }
+ 
+     // 'Random access' stuff
+ 
++    private native long getFilePointer0() throws IOException;
++
+     /**
+      * Returns the current offset in this file.
+      *
+@@ -568,7 +617,14 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      *             at which the next read or write occurs.
+      * @exception  IOException  if an I/O error occurs.
+      */
+-    public native long getFilePointer() throws IOException;
++    public long getFilePointer() throws IOException {
++
++        if (jinixRandomAccessFile != null) {
++            return jinixRandomAccessFile.getFilePointer();
++        }
++
++        return getFilePointer0();
++    }
+ 
+     /**
+      * Sets the file-pointer offset, measured from the beginning of this
+@@ -585,6 +641,11 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      *                          {@code 0} or if an I/O error occurs.
+      */
+     public void seek(long pos) throws IOException {
++        if (jinixRandomAccessFile != null) {
++            jinixRandomAccessFile.seek(pos);
++            return;
++        }
++
+         if (pos < 0) {
+             throw new IOException("Negative seek offset");
+         } else {
+@@ -594,13 +655,24 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+ 
+     private native void seek0(long pos) throws IOException;
+ 
++    private native long length0() throws IOException;
++
+     /**
+      * Returns the length of this file.
+      *
+      * @return     the length of this file, measured in bytes.
+      * @exception  IOException  if an I/O error occurs.
+      */
+-    public native long length() throws IOException;
++    public long length() throws IOException {
++
++        if (jinixRandomAccessFile != null) {
++            return jinixRandomAccessFile.length();
++        }
++
++        return length0();
++    }
++
++    private native void setLength0(long newLength) throws IOException;
+ 
+     /**
+      * Sets the length of this file.
+@@ -621,7 +693,15 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      * @exception  IOException  If an I/O error occurs
+      * @since      1.2
+      */
+-    public native void setLength(long newLength) throws IOException;
++    public void setLength(long newLength) throws IOException {
++
++        if (jinixRandomAccessFile != null) {
++            jinixRandomAccessFile.setLength(newLength);
++            return;
++        }
++
++        setLength0(newLength);
++    }
+ 
+     /**
+      * Closes this random access file stream and releases any system
+@@ -638,6 +718,11 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+      * @spec JSR-51
+      */
+     public void close() throws IOException {
++        if (jinixRandomAccessFile != null) {
++            jinixRandomAccessFile.close();
++            return;
++        }
++
+         if (!closed.compareAndSet(false, true)) {
+             // if compareAndSet() returns false closed was already true
+             return;
+@@ -645,13 +730,13 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+ 
+         FileChannel fc = channel;
+         if (fc != null) {
+-           fc.close();
++            fc.close();
+         }
+ 
+         fd.closeAll(new Closeable() {
+             public void close() throws IOException {
+-               fd.close();
+-           }
++                fd.close();
++            }
+         });
+     }
+ 
+@@ -947,20 +1032,20 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+ 
+         while (!eol) {
+             switch (c = read()) {
+-            case -1:
+-            case '\n':
+-                eol = true;
+-                break;
+-            case '\r':
+-                eol = true;
+-                long cur = getFilePointer();
+-                if ((read()) != '\n') {
+-                    seek(cur);
+-                }
+-                break;
+-            default:
+-                input.append((char)c);
+-                break;
++                case -1:
++                case '\n':
++                    eol = true;
++                    break;
++                case '\r':
++                    eol = true;
++                    long cur = getFilePointer();
++                    if ((read()) != '\n') {
++                        seek(cur);
++                    }
++                    break;
++                default:
++                    input.append((char)c);
++                    break;
+             }
+         }
+ 
+@@ -1186,10 +1271,10 @@ public class RandomAccessFile implements DataOutput, DataInput, Closeable {
+             // This is for j.u.z.ZipFile.OPEN_DELETE. The O_TEMPORARY flag
+             // is only implemented/supported on windows.
+             public RandomAccessFile openAndDelete(File file, String mode)
+-                throws IOException
++                    throws IOException
+             {
+                 return new RandomAccessFile(file, mode, true);
+             }
+         });
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/src/java.base/share/classes/java/lang/ProcessBuilder.java b/src/java.base/share/classes/java/lang/ProcessBuilder.java
+index 0b145b4e91..4c8e5b8d6e 100644
+--- a/src/java.base/share/classes/java/lang/ProcessBuilder.java
++++ b/src/java.base/share/classes/java/lang/ProcessBuilder.java
+@@ -34,6 +34,8 @@ import java.util.Arrays;
+ import java.util.ArrayList;
+ import java.util.List;
+ import java.util.Map;
++
++import org.rowland.jinixspi.JinixServiceProviderFactory;
+ import sun.security.action.GetPropertyAction;
+ 
+ /**
+@@ -560,7 +562,7 @@ public final class ProcessBuilder
+                 public Type type() { return Type.WRITE; }
+                 public String toString() { return type().toString(); }
+                 public File file() { return NULL_FILE; }
+-                boolean append() { return false; }
++                public boolean append() { return false; }
+         };
+ 
+         /**
+@@ -575,8 +577,11 @@ public final class ProcessBuilder
+         /**
+          * When redirected to a destination file, indicates if the output
+          * is to be written to the end of the file.
++         *
++         * @return append indicator
+          */
+-        boolean append() {
++        // Changed for Jinix. Not clear why this method is not public.
++        public boolean append() {
+             throw new UnsupportedOperationException();
+         }
+ 
+@@ -627,7 +632,7 @@ public final class ProcessBuilder
+                     public String toString() {
+                         return "redirect to write to file \"" + file + "\"";
+                     }
+-                    boolean append() { return false; }
++                    public boolean append() { return false; }
+                 };
+         }
+ 
+@@ -657,7 +662,7 @@ public final class ProcessBuilder
+                     public String toString() {
+                         return "redirect to append to file \"" + file + "\"";
+                     }
+-                    boolean append() { return true; }
++                    public boolean append() { return true; }
+                 };
+         }
+ 
+@@ -1103,8 +1108,9 @@ public final class ProcessBuilder
+             }
+         }
+ 
++        // Change to create Jinix process.
+         try {
+-            return ProcessImpl.start(cmdarray,
++            return JinixServiceProviderFactory.getJinixRuntime().createJinixProcess(cmdarray,
+                                      environment,
+                                      dir,
+                                      redirects,
+diff --git a/src/java.base/share/classes/java/lang/Runtime.java b/src/java.base/share/classes/java/lang/Runtime.java
+index e11eaacbf5..5660d92cea 100644
+--- a/src/java.base/share/classes/java/lang/Runtime.java
++++ b/src/java.base/share/classes/java/lang/Runtime.java
+@@ -39,6 +39,9 @@ import java.util.StringTokenizer;
+ import jdk.internal.misc.SharedSecrets;
+ import jdk.internal.reflect.CallerSensitive;
+ import jdk.internal.reflect.Reflection;
++import org.rowland.jinixspi.JinixServiceProviderFactory;
++
++import static org.rowland.jinixspi.JinixAccess.isJinix;
+ 
+ /**
+  * Every Java application has a single instance of class
+@@ -108,6 +111,11 @@ public class Runtime {
+      * @see #halt(int)
+      */
+     public void exit(int status) {
++        if (isJinix()) {
++            JinixServiceProviderFactory.getJinixRuntime().exit(status);
++            return;
++        }
++
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkExit(status);
+diff --git a/src/java.base/share/classes/java/lang/System.java b/src/java.base/share/classes/java/lang/System.java
+index e4ce3901df..d6856a1524 100644
+--- a/src/java.base/share/classes/java/lang/System.java
++++ b/src/java.base/share/classes/java/lang/System.java
+@@ -42,10 +42,7 @@ import java.lang.reflect.Method;
+ import java.lang.reflect.Modifier;
+ import java.net.URI;
+ import java.nio.charset.CharacterCodingException;
+-import java.security.AccessControlContext;
+-import java.security.ProtectionDomain;
+-import java.security.AccessController;
+-import java.security.PrivilegedAction;
++import java.security.*;
+ import java.nio.channels.Channel;
+ import java.nio.channels.spi.SelectorProvider;
+ import java.nio.charset.Charset;
+@@ -72,10 +69,14 @@ import jdk.internal.misc.VM;
+ import jdk.internal.logger.LoggerFinderLoader;
+ import jdk.internal.logger.LazyLoggers;
+ import jdk.internal.logger.LocalizedLoggerWrapper;
++import org.rowland.jinixspi.JinixNativeAccessPermission;
++import org.rowland.jinixspi.JinixServiceProviderFactory;
+ import sun.reflect.annotation.AnnotationType;
+ import sun.nio.ch.Interruptible;
+ import sun.security.util.SecurityConstants;
+ 
++import static org.rowland.jinixspi.JinixAccess.isJinix;
++
+ /**
+  * The {@code System} class contains several useful class fields
+  * and methods. It cannot be instantiated.
+@@ -710,6 +711,22 @@ public final class System {
+      * @see        java.util.Properties
+      */
+     public static Properties getProperties() {
++        if (isJinix()) {
++            Properties rtrn = new Properties();
++            rtrn.putAll(props);
++            rtrn.putAll(JinixServiceProviderFactory.getJinixSystem().getJinixProperties());
++            for (String p : rtrn.stringPropertyNames()) {
++                if (JinixServiceProviderFactory.getJinixSystem().getJinixPropOverrides().contains(p)) {
++                    rtrn.remove(p);
++                }
++            }
++            return rtrn;
++        }
++
++        return getPropertiesNative();
++    }
++
++    private static Properties getPropertiesNative() {
+         SecurityManager sm = getSecurityManager();
+         if (sm != null) {
+             sm.checkPropertiesAccess();
+@@ -804,6 +821,23 @@ public final class System {
+      * @see        java.lang.System#getProperties()
+      */
+     public static String getProperty(String key) {
++        if (isJinix()) {
++            checkKey(key);
++            Properties jinixProps = JinixServiceProviderFactory.getJinixSystem().getJinixProperties();
++            if (jinixProps.containsKey(key)) {
++                return jinixProps.getProperty(key);
++            } else {
++                if (JinixServiceProviderFactory.getJinixSystem().getJinixPropOverrides().contains(key)) {
++                    return null;
++                }
++                return props.getProperty(key);
++            }
++        }
++
++        return getPropertyNative(key);
++    }
++
++    private static String getPropertyNative(String key) {
+         checkKey(key);
+         SecurityManager sm = getSecurityManager();
+         if (sm != null) {
+diff --git a/src/java.base/share/classes/java/lang/Thread.java b/src/java.base/share/classes/java/lang/Thread.java
+index aad0f4eae0..e13b5d92c1 100644
+--- a/src/java.base/share/classes/java/lang/Thread.java
++++ b/src/java.base/share/classes/java/lang/Thread.java
+@@ -38,6 +38,7 @@ import java.util.concurrent.ConcurrentMap;
+ import java.util.concurrent.locks.LockSupport;
+ 
+ import jdk.internal.misc.TerminatingThreadLocal;
++import org.rowland.jinixspi.JinixServiceProviderFactory;
+ import sun.nio.ch.Interruptible;
+ import jdk.internal.reflect.CallerSensitive;
+ import jdk.internal.reflect.Reflection;
+@@ -141,6 +142,17 @@ import jdk.internal.HotSpotIntrinsicCandidate;
+  */
+ public
+ class Thread implements Runnable {
++
++    private static volatile boolean jinixThread = false;
++
++    /**
++     * Set the jinixThread static variable true. Once this is set, it cannot be unset, and all threads created
++     * will be registered with Jinix so that they can be controlled by the Jinix runtime.
++     */
++    public static void setJinixThread() {
++        Thread.jinixThread = true;
++    }
++
+     /* Make sure registerNatives is the first thing <clinit> does. */
+     private static native void registerNatives();
+     static {
+@@ -244,7 +256,7 @@ class Thread implements Runnable {
+      */
+     public static final int MIN_PRIORITY = 1;
+ 
+-   /**
++    /**
+      * The default priority that is assigned to a thread.
+      */
+     public static final int NORM_PRIORITY = 5;
+@@ -322,14 +334,14 @@ class Thread implements Runnable {
+      *          cleared when this exception is thrown.
+      */
+     public static void sleep(long millis, int nanos)
+-    throws InterruptedException {
++            throws InterruptedException {
+         if (millis < 0) {
+             throw new IllegalArgumentException("timeout value is negative");
+         }
+ 
+         if (nanos < 0 || nanos > 999999) {
+             throw new IllegalArgumentException(
+-                                "nanosecond timeout value out of range");
++                    "nanosecond timeout value out of range");
+         }
+ 
+         if (nanos >= 500000 || (nanos != 0 && millis == 0)) {
+@@ -447,12 +459,16 @@ class Thread implements Runnable {
+         setPriority(priority);
+         if (inheritThreadLocals && parent.inheritableThreadLocals != null)
+             this.inheritableThreadLocals =
+-                ThreadLocal.createInheritedMap(parent.inheritableThreadLocals);
++                    ThreadLocal.createInheritedMap(parent.inheritableThreadLocals);
+         /* Stash the specified stack size in case the VM cares */
+         this.stackSize = stackSize;
+ 
+         /* Set thread ID */
+         this.tid = nextThreadID();
++
++        if (jinixThread) {
++            JinixServiceProviderFactory.getJinixRuntime().registerJinixThread(this);
++        }
+     }
+ 
+     /**
+@@ -847,6 +863,11 @@ class Thread implements Runnable {
+             group.threadTerminated(this);
+             group = null;
+         }
++
++        if (jinixThread) {
++            JinixServiceProviderFactory.getJinixRuntime().unregisterJinixThread(this);
++        }
++
+         /* Aggressively null out all reference fields: see bug 4006245 */
+         target = null;
+         /* Speed the release of some of these resources */
+@@ -1292,7 +1313,7 @@ class Thread implements Runnable {
+      *          cleared when this exception is thrown.
+      */
+     public final synchronized void join(long millis)
+-    throws InterruptedException {
++            throws InterruptedException {
+         long base = System.currentTimeMillis();
+         long now = 0;
+ 
+@@ -1342,7 +1363,7 @@ class Thread implements Runnable {
+      *          cleared when this exception is thrown.
+      */
+     public final synchronized void join(long millis, int nanos)
+-    throws InterruptedException {
++            throws InterruptedException {
+ 
+         if (millis < 0) {
+             throw new IllegalArgumentException("timeout value is negative");
+@@ -1350,7 +1371,7 @@ class Thread implements Runnable {
+ 
+         if (nanos < 0 || nanos > 999999) {
+             throw new IllegalArgumentException(
+-                                "nanosecond timeout value out of range");
++                    "nanosecond timeout value out of range");
+         }
+ 
+         if (nanos >= 500000 || (nanos != 0 && millis == 0)) {
+@@ -1452,10 +1473,10 @@ class Thread implements Runnable {
+         ThreadGroup group = getThreadGroup();
+         if (group != null) {
+             return "Thread[" + getName() + "," + getPriority() + "," +
+-                           group.getName() + "]";
++                    group.getName() + "]";
+         } else {
+             return "Thread[" + getName() + "," + getPriority() + "," +
+-                            "" + "]";
++                    "" + "]";
+         }
+     }
+ 
+@@ -1489,7 +1510,7 @@ class Thread implements Runnable {
+         SecurityManager sm = System.getSecurityManager();
+         if (sm != null) {
+             ClassLoader.checkClassLoaderPermission(contextClassLoader,
+-                                                   Reflection.getCallerClass());
++                    Reflection.getCallerClass());
+         }
+         return contextClassLoader;
+     }
+@@ -1543,7 +1564,7 @@ class Thread implements Runnable {
+     public static native boolean holdsLock(Object obj);
+ 
+     private static final StackTraceElement[] EMPTY_STACK_TRACE
+-        = new StackTraceElement[0];
++            = new StackTraceElement[0];
+ 
+     /**
+      * Returns an array of stack trace elements representing the stack dump
+@@ -1587,7 +1608,7 @@ class Thread implements Runnable {
+             SecurityManager security = System.getSecurityManager();
+             if (security != null) {
+                 security.checkPermission(
+-                    SecurityConstants.GET_STACK_TRACE_PERMISSION);
++                        SecurityConstants.GET_STACK_TRACE_PERMISSION);
+             }
+             // optimization so we do not call into the vm for threads that
+             // have not yet started or have terminated
+@@ -1647,9 +1668,9 @@ class Thread implements Runnable {
+         SecurityManager security = System.getSecurityManager();
+         if (security != null) {
+             security.checkPermission(
+-                SecurityConstants.GET_STACK_TRACE_PERMISSION);
++                    SecurityConstants.GET_STACK_TRACE_PERMISSION);
+             security.checkPermission(
+-                SecurityConstants.MODIFY_THREADGROUP_PERMISSION);
++                    SecurityConstants.MODIFY_THREADGROUP_PERMISSION);
+         }
+ 
+         // Get a snapshot of the list of all threads
+@@ -1672,11 +1693,11 @@ class Thread implements Runnable {
+     private static class Caches {
+         /** cache of subclass security audit results */
+         static final ConcurrentMap<WeakClassKey,Boolean> subclassAudits =
+-            new ConcurrentHashMap<>();
++                new ConcurrentHashMap<>();
+ 
+         /** queue for WeakReferences to audited subclasses */
+         static final ReferenceQueue<Class<?>> subclassAuditsQueue =
+-            new ReferenceQueue<>();
++                new ReferenceQueue<>();
+     }
+ 
+     /**
+@@ -1707,27 +1728,27 @@ class Thread implements Runnable {
+      */
+     private static boolean auditSubclass(final Class<?> subcl) {
+         Boolean result = AccessController.doPrivileged(
+-            new PrivilegedAction<>() {
+-                public Boolean run() {
+-                    for (Class<?> cl = subcl;
+-                         cl != Thread.class;
+-                         cl = cl.getSuperclass())
+-                    {
+-                        try {
+-                            cl.getDeclaredMethod("getContextClassLoader", new Class<?>[0]);
+-                            return Boolean.TRUE;
+-                        } catch (NoSuchMethodException ex) {
+-                        }
+-                        try {
+-                            Class<?>[] params = {ClassLoader.class};
+-                            cl.getDeclaredMethod("setContextClassLoader", params);
+-                            return Boolean.TRUE;
+-                        } catch (NoSuchMethodException ex) {
++                new PrivilegedAction<>() {
++                    public Boolean run() {
++                        for (Class<?> cl = subcl;
++                             cl != Thread.class;
++                             cl = cl.getSuperclass())
++                        {
++                            try {
++                                cl.getDeclaredMethod("getContextClassLoader", new Class<?>[0]);
++                                return Boolean.TRUE;
++                            } catch (NoSuchMethodException ex) {
++                            }
++                            try {
++                                Class<?>[] params = {ClassLoader.class};
++                                cl.getDeclaredMethod("setContextClassLoader", params);
++                                return Boolean.TRUE;
++                            } catch (NoSuchMethodException ex) {
++                            }
+                         }
++                        return Boolean.FALSE;
+                     }
+-                    return Boolean.FALSE;
+                 }
+-            }
+         );
+         return result.booleanValue();
+     }
+@@ -1940,12 +1961,12 @@ class Thread implements Runnable {
+         SecurityManager sm = System.getSecurityManager();
+         if (sm != null) {
+             sm.checkPermission(
+-                new RuntimePermission("setDefaultUncaughtExceptionHandler")
+-                    );
++                    new RuntimePermission("setDefaultUncaughtExceptionHandler")
++            );
+         }
+ 
+-         defaultUncaughtExceptionHandler = eh;
+-     }
++        defaultUncaughtExceptionHandler = eh;
++    }
+ 
+     /**
+      * Returns the default handler invoked when a thread abruptly terminates
+@@ -1970,7 +1991,7 @@ class Thread implements Runnable {
+      */
+     public UncaughtExceptionHandler getUncaughtExceptionHandler() {
+         return uncaughtExceptionHandler != null ?
+-            uncaughtExceptionHandler : group;
++                uncaughtExceptionHandler : group;
+     }
+ 
+     /**
+@@ -2007,7 +2028,7 @@ class Thread implements Runnable {
+      */
+     static void processQueue(ReferenceQueue<Class<?>> queue,
+                              ConcurrentMap<? extends
+-                             WeakReference<Class<?>>, ?> map)
++                                     WeakReference<Class<?>>, ?> map)
+     {
+         Reference<? extends Class<?>> ref;
+         while((ref = queue.poll()) != null) {
+@@ -2056,7 +2077,7 @@ class Thread implements Runnable {
+             if (obj instanceof WeakClassKey) {
+                 Object referent = get();
+                 return (referent != null) &&
+-                       (referent == ((WeakClassKey) obj).get());
++                        (referent == ((WeakClassKey) obj).get());
+             } else {
+                 return false;
+             }
+@@ -2089,4 +2110,4 @@ class Thread implements Runnable {
+     private native void resume0();
+     private native void interrupt0();
+     private native void setNativeName(String name);
+-}
++}
+\ No newline at end of file

@@ -1,3 +1,0 @@
-Manifest-Version: 1.0
-Premain-Class: org.rowland.jinix.agent.RuntimeAgent
-Can-Set-Native-Method-Prefix: true

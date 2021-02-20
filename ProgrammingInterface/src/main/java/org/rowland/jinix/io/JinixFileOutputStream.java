@@ -1,9 +1,11 @@
 package org.rowland.jinix.io;
 
 import org.rowland.jinix.lang.JinixRuntime;
+import org.rowland.jinix.naming.FileNameSpace;
 import org.rowland.jinix.naming.RemoteFileHandle;
 import org.rowland.jinix.nio.JinixFileChannel;
 import org.rowland.jinix.terminal.TerminalBlockedOperationException;
+import org.rowland.jinixspi.JinixFileOutputStreamSP;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -21,7 +23,7 @@ import java.util.Set;
 /**
  * Created by rsmith on 11/27/2016.
  */
-public class JinixFileOutputStream extends OutputStream {
+public class JinixFileOutputStream extends JinixFileOutputStreamSP {
 
     JinixFileDescriptor fd;
     JinixFileChannel channel;
@@ -53,6 +55,12 @@ public class JinixFileOutputStream extends OutputStream {
                 if (lookup instanceof RemoteFileHandle) {
                     fd = new JinixFileDescriptor(((RemoteFileHandle) lookup).getParent().
                             getRemoteFileAccessor(pid, ((RemoteFileHandle) lookup).getPath(), options));
+                    return;
+                }
+                // A translator that presents as a file will be an instance of a FileNameSpace.
+                if (lookup instanceof FileNameSpace) {
+                    fd = new JinixFileDescriptor(((FileNameSpace) lookup).getRemoteFileAccessor(pid, "", options));
+                    fd.attach(this);
                     return;
                 }
             }

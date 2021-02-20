@@ -249,12 +249,6 @@ public abstract class JinixRuntime {
     public abstract void unbindTranslator(String pathName, EnumSet<NameSpace.BindTranslatorOption> options);
 
     /**
-     * Register a Java native thread with the Jinix runtime. Only called internally, and calling with any thread
-     * created in a Jinix program will be a NOOP since the thread is already registered.
-     */
-    public abstract void registerJinixThread(Thread t);
-
-    /**
      * Set the process group ID for a Jinix process. The process group ID can only be set to ID of a process group in
      * the same session as the current process. -1 can be used to create a new process group with the current process as
      * the only member. A process group leader cannot join a new process group.
@@ -313,4 +307,8 @@ public abstract class JinixRuntime {
     public abstract void exit(int status);
 
     public abstract void addLibraryToClassloader(String jarFile);
+
+    public abstract int getTerminalColumns();
+
+    public abstract int getTerminalLines();
 }

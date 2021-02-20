@@ -1,8 +1,10 @@
 package org.rowland.jinix.io;
 
 import org.rowland.jinix.lang.JinixRuntime;
+import org.rowland.jinix.naming.FileNameSpace;
 import org.rowland.jinix.naming.RemoteFileHandle;
 import org.rowland.jinix.nio.JinixFileChannel;
+import org.rowland.jinixspi.JinixRandomAccessFileSP;
 
 import java.io.*;
 import java.nio.channels.NonReadableChannelException;
@@ -19,19 +21,19 @@ import java.util.Set;
 /**
  * Created by rsmith on 12/23/2016.
  */
-public class JinixRandomAccessFile {
+public class JinixRandomAccessFile implements JinixRandomAccessFileSP {
 
     private JinixFileDescriptor fd;
     private JinixFileChannel channel = null;
 
     Set<StandardOpenOption> options;
 
-    public JinixRandomAccessFile(String name, String mode)
+    public JinixRandomAccessFile(String name, String mode, boolean openAndDelete)
             throws FileNotFoundException {
-        this(name != null ? new JinixFile(name) : null, mode);
+        this(name != null ? new JinixFile(name) : null, mode, openAndDelete);
     }
 
-    public JinixRandomAccessFile(JinixFile file, String mode)
+    public JinixRandomAccessFile(JinixFile file, String mode, boolean openAndDelete)
             throws FileNotFoundException {
         String name = (file != null ? file.getPath() : null);
 
@@ -77,10 +79,20 @@ public class JinixRandomAccessFile {
                             getRemoteFileAccessor(pid, ((RemoteFileHandle) lookup).getPath()+"/"+fileName, options));
                     return;
                 }
+                if (lookup instanceof FileNameSpace) {
+                    fd = new JinixFileDescriptor(((FileNameSpace) lookup).
+                            getRemoteFileAccessor(pid, "/"+fileName, options));
+                    return;
+                }
             } else {
                 if (lookup instanceof RemoteFileHandle) {
                     fd = new JinixFileDescriptor(((RemoteFileHandle) lookup).getParent().
                             getRemoteFileAccessor(pid, ((RemoteFileHandle) lookup).getPath(), options));
+                    return;
+                }
+                // A translator that presents as a file will be an instance of a FileNameSpace.
+                if (lookup instanceof FileNameSpace) {
+                    fd = new JinixFileDescriptor(((FileNameSpace) lookup).getRemoteFileAccessor(pid, "", options));
                     return;
                 }
             }

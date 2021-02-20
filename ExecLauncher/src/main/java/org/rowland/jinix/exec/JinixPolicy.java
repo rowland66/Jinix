@@ -1,9 +1,7 @@
 package org.rowland.jinix.exec;
 
-import org.rowland.jinix.io.JinixNativeAccessPermission;
-import sun.security.util.SecurityConstants;
+import org.rowland.jinixspi.JinixNativeAccessPermission;
 
-import java.net.SocketPermission;
 import java.security.*;
 import java.util.Enumeration;
 import java.util.PropertyPermission;
@@ -20,7 +18,7 @@ public class JinixPolicy extends Policy {
 
     JinixPolicy() {
         allowed = new Permissions();
-        allowed.add(new PropertyPermission("*", SecurityConstants.PROPERTY_READ_ACTION));
+        allowed.add(new PropertyPermission("*", "read"));
         allowed.add(new RuntimePermission("*", null));
     }
 

@@ -1,6 +1,6 @@
 package org.rowland.jinix.nio;
 
-import org.rowland.jinix.io.JinixNativeAccessPermission;
+import org.rowland.jinixspi.JinixNativeAccessPermission;
 import org.rowland.jinix.lang.JinixRuntime;
 
 import java.io.IOException;

@@ -1,6 +1,5 @@
 package org.rowland.jinix;
 
-import org.rowland.jinix.exec.ExecClassLoader;
 import org.rowland.jinix.naming.RemoteFileHandle;
 import org.rowland.jinix.naming.RemoteJarFileAccessor;
 
@@ -23,7 +22,7 @@ import java.util.Map;
  */
 public class KernelRMIClassLoader extends RMIClassLoaderSpi{
 
-    private static Map<String, ExecClassLoader> codebaseLoaderMap = new HashMap<>();
+    private static Map<String, ServerRMIClassLoader> codebaseLoaderMap = new HashMap<>();
 
     public KernelRMIClassLoader() {
         super();
@@ -43,7 +42,7 @@ public class KernelRMIClassLoader extends RMIClassLoaderSpi{
         }
 
         // If a codebase is provided, get a loader for the codebase. These loaders are cached using codebase as the key.
-        // Each codebase classloader has the processes primary ExecClassLoader as a parent and defers loading to the parent.
+        // Each codebase classloader has the processes primary ServerRMIClassLoader as a parent and defers loading to the parent.
         ClassLoader loader = null;
         if (codebase != null) {
             loader = getClassLoader(codebase);
@@ -89,6 +88,8 @@ public class KernelRMIClassLoader extends RMIClassLoaderSpi{
             codebase = codebase.substring("file://".length());
         }
 
+        System.out.println("Lookup codebase: "+codebase);
+
         if (codebaseLoaderMap.containsKey(codebase)) {
             return codebaseLoaderMap.get(codebase);
         }
@@ -102,7 +103,7 @@ public class KernelRMIClassLoader extends RMIClassLoaderSpi{
             }
             RemoteJarFileAccessor remoteJarAccessor = (RemoteJarFileAccessor) ((RemoteFileHandle) lookup).getParent().
                     getRemoteFileAccessor(-1, ((RemoteFileHandle) lookup).getPath(), EnumSet.of(StandardOpenOption.READ));
-            ExecClassLoader cl = new ExecClassLoader(codebase, false, remoteJarAccessor, parent);
+            ServerRMIClassLoader cl = new ServerRMIClassLoader(codebase, false, remoteJarAccessor, parent);
             codebaseLoaderMap.put(codebase, cl);
             return cl;
         } catch (RemoteException e) {
@@ -130,11 +131,11 @@ public class KernelRMIClassLoader extends RMIClassLoaderSpi{
         }
 
         // This method is called when objects are marshalled out to a stream. This adds a string that annotates the
-        // class. Only ExecClassLoader classes need to be annotated. Any other classes should be part of the JDK libraries
+        // class. Only ServerRMIClassLoader classes need to be annotated. Any other classes should be part of the JDK libraries
         // or Jinix libraries that are provided in every process classpath.
         ClassLoader loader = cl.getClassLoader();
-        if (loader != null && loader instanceof ExecClassLoader) {
-            return ((ExecClassLoader) loader).getJarFileName();
+        if (loader != null && loader instanceof ServerRMIClassLoader) {
+            return ((ServerRMIClassLoader) loader).getJarFileName();
         }
 
         return null;
@@ -145,7 +146,7 @@ public class KernelRMIClassLoader extends RMIClassLoaderSpi{
      * the Jinix process shuts down.
      */
     static void close() {
-        for (ExecClassLoader cl : codebaseLoaderMap.values()) {
+        for (ServerRMIClassLoader cl : codebaseLoaderMap.values()) {
             cl.close();
         }
         codebaseLoaderMap.clear();

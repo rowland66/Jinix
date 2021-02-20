@@ -2,7 +2,6 @@ package org.rowland.jinix;
 
 import org.rowland.jinix.exec.ExecServer;
 import org.rowland.jinix.exec.InvalidExecutableException;
-import org.rowland.jinix.io.JinixFile;
 import org.rowland.jinix.io.JinixFileDescriptor;
 import org.rowland.jinix.io.JinixFileOutputStream;
 import org.rowland.jinix.io.JinixFileInputStream;
@@ -79,7 +78,7 @@ public class Console {
             try (Reader environmentFileReader = new BufferedReader(new InputStreamReader(new JinixFileInputStream(new JinixFileDescriptor(environmentRaf))))) {
                 envProps.load(environmentFileReader);
             } catch (IOException e) {
-                throw new RuntimeException("IOException loading /etc/environment.config", e);
+                throw new RuntimeException("IOException loading /config/environment.config", e);
             }
 
             try {
