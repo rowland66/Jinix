@@ -30,54 +30,15 @@ import java.util.jar.Attributes;
  */
 public class ServerRMIClassLoader extends SecureClassLoader {
 
-    private String jarFileName;
-    private boolean isPrivileged;
+    private final String jarFileName;
+    private final boolean isPrivileged;
     private List<RemoteJarHolder> remoteJarList;
-    private boolean closed = true;
+    private boolean closed;
     private JarManifest jarManifest;
     private boolean missingManifest;
 
     /* The context to be used when loading classes and resources */
     private final AccessControlContext acc;
-
-    /**
-     * Create an ExecClassloader for a Jinix jar file.
-     *
-     * @param jarFileName the absolute pathname of a Jinix jar file
-     * @param privileged indicates whether classes loaded by this ClassLoader are privileged to native OS resources
-     * @param parent the parent classloader
-     */
-    public ServerRMIClassLoader(String jarFileName, boolean privileged, ClassLoader parent) {
-        super(parent);
-        this.jarFileName = jarFileName;
-        this.isPrivileged = privileged;
-        this.acc = AccessController.getContext();
-        this.remoteJarList = new LinkedList<RemoteJarHolder>();
-
-        Context ctx = JinixRuntime.getRuntime().getNamingContext();
-        try {
-            RemoteFileHandle jarFile = (RemoteFileHandle) ctx.lookup(jarFileName);
-            RemoteJarFileAccessor jarFileAccessor = (RemoteJarFileAccessor) jarFile.getParent().
-                    getRemoteFileAccessor(JinixRuntime.getRuntime().getPid(), jarFile.getPath(), EnumSet.noneOf(StandardOpenOption.class));
-            remoteJarList.add(new RemoteJarHolder(jarFileName, jarFileAccessor));
-        } catch (NameNotFoundException | ClassCastException e) {
-            remoteJarList = null; // We don't fail, but when remoteJarList is null, no classes will be loaded.
-        } catch (NamingException e) {
-            throw new RuntimeException(e);
-        } catch (FileAlreadyExistsException | NoSuchFileException e) {
-            throw new RuntimeException("Internal error: ", e); // This should never happen
-        } catch (RemoteException e) {
-            throw new RuntimeException(e);
-        }
-
-        try {
-            resolveExecClassPath();
-        } catch (IOException e) {
-            throw new RuntimeException("Internal error", e);
-        }
-
-        closed = false;
-    }
 
     /**
      * Create an ExecClassloader for a Jinix jar file. This constructor is only called from the Jinix kernel.
@@ -93,7 +54,7 @@ public class ServerRMIClassLoader extends SecureClassLoader {
         this.isPrivileged = privileged;
         this.acc = AccessController.getContext();
 
-        this.remoteJarList = new LinkedList<RemoteJarHolder>();
+        this.remoteJarList = new LinkedList<>();
         remoteJarList.add(new RemoteJarHolder(jarFileName, remoteJarAccessor));
 
         try {
@@ -106,25 +67,16 @@ public class ServerRMIClassLoader extends SecureClassLoader {
     }
 
     void addLibraryToClasspath(String jarFileName) {
-        String libraryPathStr = JinixSystem.getJinixProperties().getProperty(JinixRuntime.JINIX_LIBRARY_PATH);
-        if (libraryPathStr == null || libraryPathStr.isEmpty()) {
-            return;
-        }
-
-        Context ctx = JinixRuntime.getRuntime().getNamingContext();
+        String libraryPathStr = "/lib";
         String[] libraryPath = libraryPathStr.split(":");
         for(String libDir : libraryPath) {
             String libPathName = libDir + "/" + jarFileName;
             try {
-                RemoteFileHandle jarFile = (RemoteFileHandle) ctx.lookup(libPathName);
-                RemoteJarFileAccessor jarFileAccessor = (RemoteJarFileAccessor) jarFile.getParent().getRemoteFileAccessor(
-                        JinixRuntime.getRuntime().getPid(), jarFile.getPath(), EnumSet.noneOf(StandardOpenOption.class));
+                RemoteFileHandle jarFile = (RemoteFileHandle) JinixKernel.getNameSpaceRoot().lookup(libPathName);
+                RemoteJarFileAccessor jarFileAccessor = (RemoteJarFileAccessor) jarFile.getParent().
+                        getRemoteFileAccessor(-1, jarFile.getPath(), EnumSet.of(StandardOpenOption.READ));
                 remoteJarList.add(new RemoteJarHolder(libPathName, jarFileAccessor));
                 break;
-            } catch (NameNotFoundException e) {
-                // Ignore. If we don't find the continue searching.
-            } catch (NamingException e) {
-                throw new RuntimeException("Internal error", e);
             } catch (FileAlreadyExistsException | NoSuchFileException e) {
                 throw new RuntimeException("Internal error: ", e); // This should never happen
             } catch (RemoteException e) {
@@ -141,34 +93,32 @@ public class ServerRMIClassLoader extends SecureClassLoader {
         final Class<?> result;
         try {
             result = AccessController.doPrivileged(
-                    new PrivilegedExceptionAction<Class<?>>() {
-                        public Class<?> run() throws ClassNotFoundException, RemoteException {
-                            String path = name.replace('.', '/').concat(".class");
-                            String pkg;
-                            if (path.indexOf('/') == -1) {
-                                pkg = "/"; // package for classes in the default package
-                            } else {
-                                pkg = path.substring(0, path.lastIndexOf("/"));
-                            }
-                            long entrySize;
-                            for (RemoteJarHolder remoteJarHolder : remoteJarList) {
-                                if (remoteJarHolder.pkg == null) {
-                                    remoteJarHolder.pkg = remoteJarHolder.remoteJar.getPackages();
-                                }
-                                if (Arrays.binarySearch(remoteJarHolder.pkg, pkg) > -1) {
-                                    if ((entrySize = remoteJarHolder.remoteJar.findEntry(path)) > -1) {
-                                        byte[] classBytes;
-                                        try {
-                                            classBytes = remoteJarHolder.remoteJar.read(-1, (int) entrySize);
-                                        } finally {
-                                            remoteJarHolder.remoteJar.close();
-                                        }
-                                        return defineClass(name, classBytes, 0, classBytes.length);
-                                    }
-                                }
-                            }
-                            return null;
+                    (PrivilegedExceptionAction<Class<?>>) () -> {
+                        String path = name.replace('.', '/').concat(".class");
+                        String pkg;
+                        if (path.indexOf('/') == -1) {
+                            pkg = "/"; // package for classes in the default package
+                        } else {
+                            pkg = path.substring(0, path.lastIndexOf("/"));
                         }
+                        long entrySize;
+                        for (RemoteJarHolder remoteJarHolder : remoteJarList) {
+                            if (remoteJarHolder.pkg == null) {
+                                remoteJarHolder.pkg = remoteJarHolder.remoteJar.getPackages();
+                            }
+                            if (Arrays.binarySearch(remoteJarHolder.pkg, pkg) > -1) {
+                                if ((entrySize = remoteJarHolder.remoteJar.findEntry(path)) > -1) {
+                                    byte[] classBytes;
+                                    try {
+                                        classBytes = remoteJarHolder.remoteJar.read(-1, (int) entrySize);
+                                    } finally {
+                                        remoteJarHolder.remoteJar.close();
+                                    }
+                                    return defineClass(name, classBytes, 0, classBytes.length);
+                                }
+                            }
+                        }
+                        return null;
                     }, acc);
         } catch (java.security.PrivilegedActionException pae) {
             if (pae.getException() instanceof ClassNotFoundException) {
@@ -190,26 +140,24 @@ public class ServerRMIClassLoader extends SecureClassLoader {
         final URL result;
         try {
             result = AccessController.doPrivileged(
-                    new PrivilegedExceptionAction<URL>() {
-                        public URL run() throws MalformedURLException, RemoteException {
-                            String pkg;
-                            if (name.indexOf('/') == -1) {
-                                pkg = "/";
-                            } else {
-                                pkg = name.substring(0, name.lastIndexOf("/"));
-                            }
-                            for (RemoteJarHolder remoteJarHolder : remoteJarList) {
-                                if (remoteJarHolder.pkg == null) {
-                                    remoteJarHolder.pkg = remoteJarHolder.remoteJar.getPackages();
-                                }
-                                if (Arrays.binarySearch(remoteJarHolder.pkg, pkg) > -1) {
-                                    if (remoteJarHolder.remoteJar.findEntry(name) > -1) {
-                                        return new URL("jns", null, -1, remoteJarHolder.name+"!/"+name, new JinixFileStreamHandler());
-                                    }
-                                }
-                            }
-                            return null;
+                    (PrivilegedExceptionAction<URL>) () -> {
+                        String pkg;
+                        if (name.indexOf('/') == -1) {
+                            pkg = "/";
+                        } else {
+                            pkg = name.substring(0, name.lastIndexOf("/"));
                         }
+                        for (RemoteJarHolder remoteJarHolder : remoteJarList) {
+                            if (remoteJarHolder.pkg == null) {
+                                remoteJarHolder.pkg = remoteJarHolder.remoteJar.getPackages();
+                            }
+                            if (Arrays.binarySearch(remoteJarHolder.pkg, pkg) > -1) {
+                                if (remoteJarHolder.remoteJar.findEntry(name) > -1) {
+                                    return new URL("jns", null, -1, remoteJarHolder.name+"!/"+name, new JinixFileStreamHandler());
+                                }
+                            }
+                        }
+                        return null;
                     }, acc);
         } catch (java.security.PrivilegedActionException pae) {
             if (pae.getException() instanceof MalformedURLException) {
@@ -221,7 +169,7 @@ public class ServerRMIClassLoader extends SecureClassLoader {
     }
 
     @Override
-    protected Enumeration<URL> findResources(String name) throws IOException {
+    protected Enumeration<URL> findResources(String name) {
         if (closed || remoteJarList == null) {
             return null;
         }
@@ -229,27 +177,25 @@ public class ServerRMIClassLoader extends SecureClassLoader {
         final List<URL> result;
         try {
             result = AccessController.doPrivileged(
-                    new PrivilegedExceptionAction<List<URL>>() {
-                        public List<URL> run() throws MalformedURLException, RemoteException {
-                            String pkg;
-                            if (name.indexOf('/') == -1) {
-                                pkg = "/";
-                            } else {
-                                pkg = name.substring(0, name.lastIndexOf("/"));
-                            }
-                            List<URL> rtrnList = new ArrayList<URL>();
-                            for (RemoteJarHolder remoteJarHolder : remoteJarList) {
-                                if (remoteJarHolder.pkg == null) {
-                                    remoteJarHolder.pkg = remoteJarHolder.remoteJar.getPackages();
-                                }
-                                if (Arrays.binarySearch(remoteJarHolder.pkg, pkg) > -1) {
-                                    if (remoteJarHolder.remoteJar.findEntry(name) > -1) {
-                                        rtrnList.add(new URL("jns", null, -1, remoteJarHolder.name+"!/"+name, new JinixFileStreamHandler()));
-                                    }
-                                }
-                            }
-                            return rtrnList;
+                    (PrivilegedExceptionAction<List<URL>>) () -> {
+                        String pkg;
+                        if (name.indexOf('/') == -1) {
+                            pkg = "/";
+                        } else {
+                            pkg = name.substring(0, name.lastIndexOf("/"));
                         }
+                        List<URL> rtrnList = new ArrayList<>();
+                        for (RemoteJarHolder remoteJarHolder : remoteJarList) {
+                            if (remoteJarHolder.pkg == null) {
+                                remoteJarHolder.pkg = remoteJarHolder.remoteJar.getPackages();
+                            }
+                            if (Arrays.binarySearch(remoteJarHolder.pkg, pkg) > -1) {
+                                if (remoteJarHolder.remoteJar.findEntry(name) > -1) {
+                                    rtrnList.add(new URL("jns", null, -1, remoteJarHolder.name+"!/"+name, new JinixFileStreamHandler()));
+                                }
+                            }
+                        }
+                        return rtrnList;
                     }, acc);
         } catch (java.security.PrivilegedActionException pae) {
             if (pae.getException() instanceof MalformedURLException) {
@@ -258,8 +204,8 @@ public class ServerRMIClassLoader extends SecureClassLoader {
             throw new RuntimeException(pae.getException());
         }
 
-        return new Enumeration<URL>() {
-            private Iterator<URL> iterator = result.iterator();
+        return new Enumeration<>() {
+            private final Iterator<URL> iterator = result.iterator();
 
             public boolean hasMoreElements() {
                 return iterator.hasNext();
@@ -278,29 +224,6 @@ public class ServerRMIClassLoader extends SecureClassLoader {
      */
     public String getJarFileName() {
         return this.jarFileName;
-    }
-
-
-
-    /**
-     * Get the name of the jar file main class, or null if
-     * no "Main-Class" manifest attributes was defined.
-
-     * @return the jar file manifest main class name or null if manifest missing or manifest has no Main-Class attribute
-     * @throws IOException
-     */
-    String getMainClassName() throws IOException {
-        if (closed || remoteJarList == null) {
-            throw new NoSuchFileException(jarFileName);
-        }
-        loadManifest();
-
-        if (missingManifest) {
-            return null;
-        }
-
-        JarAttributes attr = this.jarManifest.getMainAttributes();
-        return attr != null ? attr.getValue(Attributes.Name.MAIN_CLASS) : null;
     }
 
     private void loadManifest() throws RemoteException {
@@ -368,9 +291,9 @@ public class ServerRMIClassLoader extends SecureClassLoader {
     }
 
     private static class RemoteJarHolder {
-        private String name;
+        private final String name;
         private String[] pkg;
-        private RemoteJarFileAccessor remoteJar;
+        private final RemoteJarFileAccessor remoteJar;
 
         private RemoteJarHolder(String name, RemoteJarFileAccessor remoteJar) {
             this.name = name;
