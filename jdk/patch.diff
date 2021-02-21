@@ -1875,6 +1875,20 @@ index aad0f4eae0..e13b5d92c1 100644
 -}
 +}
 \ No newline at end of file
+diff --git a/src/java.base/share/classes/module-info.java b/src/java.base/share/classes/module-info.java
+index 517622452b..bba1dc52e6 100644
+--- a/src/java.base/share/classes/module-info.java
++++ b/src/java.base/share/classes/module-info.java
+@@ -128,6 +128,9 @@ module java.base {
+     exports javax.security.auth.x500;
+     exports javax.security.cert;
+ 
++    // Added for Jinix
++    exports org.rowland.jinixspi;
++
+ 
+     // additional qualified exports may be inserted at build time
+     // see make/gensrc/GenModuleInfo.gmk
 diff --git a/src/java.base/share/native/libjava/RandomAccessFile.c b/src/java.base/share/native/libjava/RandomAccessFile.c
 index d20dfe869a..5953752b7c 100644
 --- a/src/java.base/share/native/libjava/RandomAccessFile.c
