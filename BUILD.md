@@ -3,19 +3,20 @@
 Build a modified jdk. The modifications are based on jdk-11+28, so you will need to use
 git to checkout this tag.
 
-git clone https://github.com/openjdk/jdk11u.git
-git checkout jdk-11+28
+`  git clone --branch jdk-11+28 https://github.com/openjdk/jdk11u.git`
 
 Create a JinixOS directory
 
 From the JinixOS directory, checkout the Jinix repo. https://github.com/rowland66/Jinix.git
 
-Patch the jdk by appling the patch.txt files in Jinix/jdk and Jinix/jinix-spi. Use the
+Patch the jdk by appling the patch.diff files in Jinix/jdk and Jinix/jinix-spi. Use the
 --ignore-space-change option.
+
+`  git apply --ignore-space-change patch.diff`
 
 Configure the jdk build by running 
 
-'bash configure --disable-warnings-as-errors --with-version-pre=jinix'
+`  bash configure --disable-warnings-as-errors --with-version-pre=jinix`
 
 See build instructions available at doc/building.md. You will need a JDK installed and you
 can specify the jdk location with --with-boot-jdk
@@ -41,31 +42,33 @@ is not set, Jinix must be started from the JinixOS directory.
 **Installing and Building Jinix**
 
 From the JinixOS directory, checkout the following Jinix repos from Github
-CoreTranslators (https://github.com/rowland66/CoreTranslators.git)
-CoreUtilities (https://github.com/rowland66/CoreUtilities.git)
-KernelLogging (https://github.com/rowland66/KernelLogging.git)
-sshd (https://github.com/rowland66/sshd.git)
-Translators (https://github.com/rowland66/Translators.git)
 
-Create the following directories
-  lib
+CoreTranslators (https://github.com/rowland66/CoreTranslators.git) <br>
+CoreUtilities (https://github.com/rowland66/CoreUtilities.git) <br>
+KernelLogging (https://github.com/rowland66/KernelLogging.git) <br>
+sshd (https://github.com/rowland66/sshd.git) <br>
+Translators (https://github.com/rowland66/Translators.git) <br>
 
-Copy the following directories from JinixOS/Jinix into the JinixOS directory:
-  scripts
-  config
+Create the following directories<br>
+`  lib`
+
+Copy the following directories from JinixOS/Jinix into the JinixOS directory:<br>
+`  scripts`<br>
+`  config`
 
 Using the java jar utility, unjar JinixOS/Jinix/root.jar into the JinixOS directory
-  jar -xf Jinix/root.jar
+
+`  jar -xf Jinix/root.jar`
 
 Build each of the maven projects by entering the project directory and executing 'mvn install'. Build
 the projects in the following order:
 
-Jinix
-KernelLogging
-CoreTranslators
-CoreUtilities
-Translators
-sshd
+Jinix<br>
+KernelLogging<br>
+CoreTranslators<br>
+CoreUtilities<br>
+Translators<br>
+sshd<br>
 
 Copy the NativeFileSystem.jar file from JinixOS/root/bin to JinixOS/lib.
 
