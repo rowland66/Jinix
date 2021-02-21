@@ -43,4 +43,3 @@ public class JinixNativeAccessPermission extends Permission {
         return "";
     }
 }
-

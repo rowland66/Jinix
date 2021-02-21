@@ -56,5 +56,3 @@ public class JinixServiceProviderFactory {
         return factoryImpl.getJinixRuntime();
     }
 }
-
-

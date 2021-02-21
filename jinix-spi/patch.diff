@@ -147,7 +147,7 @@ new file mode 100644
 index 0000000000..f04ccd2469
 --- /dev/null
 +++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixNativeAccessPermission.java
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,45 @@
 +package org.rowland.jinixspi;
 +
 +import java.security.Permission;
@@ -193,7 +193,6 @@ index 0000000000..f04ccd2469
 +        return "";
 +    }
 +}
-+
 diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixRandomAccessFileSP.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixRandomAccessFileSP.java
 new file mode 100644
 index 0000000000..4fef8f6762
@@ -263,7 +262,7 @@ new file mode 100644
 index 0000000000..d2c5ebb57b
 --- /dev/null
 +++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProfiderFactory.java
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,24 @@
 +package org.rowland.jinixspi;
 +
 +import java.net.URI;
@@ -288,14 +287,12 @@ index 0000000000..d2c5ebb57b
 +
 +    public static JinixRandomAccessFileSP createJinixRandomAccessFile(JinixFileSP file, String mode, boolean openAndDelete) {return null;}
 +}
-+
-+
 diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProviderFactory.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProviderFactory.java
 new file mode 100644
 index 0000000000..bcfa72fc4e
 --- /dev/null
 +++ b/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProviderFactory.java
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,58 @@
 +package org.rowland.jinixspi;
 +
 +import java.io.FileNotFoundException;
@@ -354,8 +351,6 @@ index 0000000000..bcfa72fc4e
 +        return factoryImpl.getJinixRuntime();
 +    }
 +}
-+
-+
 diff --git a/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProviderFactoryImplementor.java b/src/java.base/share/classes/org/rowland/jinixspi/JinixServiceProviderFactoryImplementor.java
 new file mode 100644
 index 0000000000..800434ee76
