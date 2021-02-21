@@ -88,8 +88,6 @@ public class KernelRMIClassLoader extends RMIClassLoaderSpi{
             codebase = codebase.substring("file://".length());
         }
 
-        System.out.println("Lookup codebase: "+codebase);
-
         if (codebaseLoaderMap.containsKey(codebase)) {
             return codebaseLoaderMap.get(codebase);
         }

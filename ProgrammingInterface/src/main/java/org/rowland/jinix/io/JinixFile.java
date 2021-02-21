@@ -8,12 +8,7 @@ import org.rowland.jinixspi.JinixFileSP;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.*;
-import java.rmi.Remote;
 import java.rmi.RemoteException;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-import java.security.PrivilegedActionException;
-import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 
 /**
@@ -669,10 +664,5 @@ public class JinixFile implements JinixFileSP {
 
     private String fixPath(String path) {
         return path.replace('\\', '/');
-    }
-    public static void main(String[] args) {
-        JinixFile j = new JinixFile("./Test.java");
-        System.out.println(j.getPath());
-        System.out.println(j.getName());
     }
 }

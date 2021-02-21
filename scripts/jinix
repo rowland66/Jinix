@@ -1,2 +1,17 @@
 #!bash
-${JAVA_HOME}/bin/java -classpath lib\ServerInterfaces.jar:lib\Servers.jar:lib\ProgrammingInterface.jar:lib\NativeFileSystem.jar org.rowland.jinix.JinixKernel
+if [ -z "$JINIX_JAVA_HOME" ]
+then
+  echo "Set JINIX_JAVA_HOME to reference the modified Jinix JDK using the export command"
+  exit;
+fi
+
+if [ -z "$JINIX_HOME"]
+then
+  export JINIX_HOME=`pwd`;
+fi
+
+cd ${JINIX_HOME}
+export JINIX_CLASSPATH=${JINIX_HOME}/lib/ServerInterfaces.jar:${JINIX_HOME}/lib/Servers.jar:${JINIX_HOME}/lib/ProgrammingInterface.jar:${JINIX_HOME}/lib/NativeFileSystem.jar;
+
+echo "Starting Jinix using jdk ${JINIX_JAVA_HOME} from ${JINIX_HOME}"
+${JAVA_HOME}/bin/java -classpath ${JINIX_CLASSPATH} org.rowland.jinix.JinixKernel

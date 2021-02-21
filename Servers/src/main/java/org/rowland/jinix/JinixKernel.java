@@ -282,7 +282,7 @@ public class JinixKernel {
     private static FileNameSpace getRootFileSystem(String[] args) {
 
         try {
-            Class rootFileSystemClass = Class.forName("org.rowland.jinix.nativefilesystem.FileSystemServer");
+            Class<?> rootFileSystemClass = Class.forName("org.rowland.jinix.nativefilesystem.FileSystemServer");
             Method initMethod = rootFileSystemClass.getMethod("runAsRootFileSystem", args.getClass());
             Object[] invokeArgs = new Object[1];
             invokeArgs[0] = args;

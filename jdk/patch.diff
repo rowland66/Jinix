@@ -1397,10 +1397,10 @@ index 55abd462ce..716468bb5c 100644
 +}
 \ No newline at end of file
 diff --git a/src/java.base/share/classes/java/lang/ProcessBuilder.java b/src/java.base/share/classes/java/lang/ProcessBuilder.java
-index 0b145b4e91..4c8e5b8d6e 100644
+index 0b145b4e91..d882c917f5 100644
 --- a/src/java.base/share/classes/java/lang/ProcessBuilder.java
 +++ b/src/java.base/share/classes/java/lang/ProcessBuilder.java
-@@ -34,6 +34,8 @@ import java.util.Arrays;
+@@ -34,8 +34,12 @@ import java.util.Arrays;
  import java.util.ArrayList;
  import java.util.List;
  import java.util.Map;
@@ -1408,8 +1408,12 @@ index 0b145b4e91..4c8e5b8d6e 100644
 +import org.rowland.jinixspi.JinixServiceProviderFactory;
  import sun.security.action.GetPropertyAction;
  
++import static org.rowland.jinixspi.JinixAccess.isJinix;
++
  /**
-@@ -560,7 +562,7 @@ public final class ProcessBuilder
+  * This class is used to create operating system processes.
+  *
+@@ -560,7 +564,7 @@ public final class ProcessBuilder
                  public Type type() { return Type.WRITE; }
                  public String toString() { return type().toString(); }
                  public File file() { return NULL_FILE; }
@@ -1418,7 +1422,7 @@ index 0b145b4e91..4c8e5b8d6e 100644
          };
  
          /**
-@@ -575,8 +577,11 @@ public final class ProcessBuilder
+@@ -575,8 +579,11 @@ public final class ProcessBuilder
          /**
           * When redirected to a destination file, indicates if the output
           * is to be written to the end of the file.
@@ -1431,7 +1435,7 @@ index 0b145b4e91..4c8e5b8d6e 100644
              throw new UnsupportedOperationException();
          }
  
-@@ -627,7 +632,7 @@ public final class ProcessBuilder
+@@ -627,7 +634,7 @@ public final class ProcessBuilder
                      public String toString() {
                          return "redirect to write to file \"" + file + "\"";
                      }
@@ -1440,7 +1444,7 @@ index 0b145b4e91..4c8e5b8d6e 100644
                  };
          }
  
-@@ -657,7 +662,7 @@ public final class ProcessBuilder
+@@ -657,7 +664,7 @@ public final class ProcessBuilder
                      public String toString() {
                          return "redirect to append to file \"" + file + "\"";
                      }
@@ -1449,17 +1453,48 @@ index 0b145b4e91..4c8e5b8d6e 100644
                  };
          }
  
-@@ -1103,8 +1108,9 @@ public final class ProcessBuilder
+@@ -1103,12 +1110,21 @@ public final class ProcessBuilder
              }
          }
  
 +        // Change to create Jinix process.
          try {
 -            return ProcessImpl.start(cmdarray,
-+            return JinixServiceProviderFactory.getJinixRuntime().createJinixProcess(cmdarray,
-                                      environment,
-                                      dir,
-                                      redirects,
+-                                     environment,
+-                                     dir,
+-                                     redirects,
+-                                     redirectErrorStream);
++            if (isJinix()) {
++                return JinixServiceProviderFactory.getJinixRuntime().createJinixProcess(cmdarray,
++                        environment,
++                        dir,
++                        redirects,
++                        redirectErrorStream);
++            } else {
++                return ProcessImpl.start(cmdarray,
++                        environment,
++                        dir,
++                        redirects,
++                        redirectErrorStream);
++            }
+         } catch (IOException | IllegalArgumentException e) {
+             String exceptionInfo = ": " + e.getMessage();
+             Throwable cause = e;
+@@ -1124,10 +1140,10 @@ public final class ProcessBuilder
+             // It's much easier for us to create a high-quality error
+             // message than the low-level C code which found the problem.
+             throw new IOException(
+-                "Cannot run program \"" + prog + "\""
+-                + (dir == null ? "" : " (in directory \"" + dir + "\")")
+-                + exceptionInfo,
+-                cause);
++                    "Cannot run program \"" + prog + "\""
++                            + (dir == null ? "" : " (in directory \"" + dir + "\")")
++                            + exceptionInfo,
++                    cause);
+         }
+     }
+ 
 diff --git a/src/java.base/share/classes/java/lang/Runtime.java b/src/java.base/share/classes/java/lang/Runtime.java
 index e11eaacbf5..5660d92cea 100644
 --- a/src/java.base/share/classes/java/lang/Runtime.java

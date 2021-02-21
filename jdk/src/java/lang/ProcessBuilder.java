@@ -38,6 +38,8 @@ import java.util.Map;
 import org.rowland.jinixspi.JinixServiceProviderFactory;
 import sun.security.action.GetPropertyAction;
 
+import static org.rowland.jinixspi.JinixAccess.isJinix;
+
 /**
  * This class is used to create operating system processes.
  *
@@ -1110,11 +1112,19 @@ public final class ProcessBuilder
 
         // Change to create Jinix process.
         try {
-            return JinixServiceProviderFactory.getJinixRuntime().createJinixProcess(cmdarray,
-                                     environment,
-                                     dir,
-                                     redirects,
-                                     redirectErrorStream);
+            if (isJinix()) {
+                return JinixServiceProviderFactory.getJinixRuntime().createJinixProcess(cmdarray,
+                        environment,
+                        dir,
+                        redirects,
+                        redirectErrorStream);
+            } else {
+                return ProcessImpl.start(cmdarray,
+                        environment,
+                        dir,
+                        redirects,
+                        redirectErrorStream);
+            }
         } catch (IOException | IllegalArgumentException e) {
             String exceptionInfo = ": " + e.getMessage();
             Throwable cause = e;
@@ -1130,10 +1140,10 @@ public final class ProcessBuilder
             // It's much easier for us to create a high-quality error
             // message than the low-level C code which found the problem.
             throw new IOException(
-                "Cannot run program \"" + prog + "\""
-                + (dir == null ? "" : " (in directory \"" + dir + "\")")
-                + exceptionInfo,
-                cause);
+                    "Cannot run program \"" + prog + "\""
+                            + (dir == null ? "" : " (in directory \"" + dir + "\")")
+                            + exceptionInfo,
+                    cause);
         }
     }
 
